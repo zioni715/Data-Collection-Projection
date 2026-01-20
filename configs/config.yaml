@@ -1,0 +1,24 @@
+db_path: collector.db
+migrations_path: migrations
+validation_level: lenient
+wal_mode: true
+log_level: INFO
+privacy_rules_path: configs/privacy_rules.yaml
+
+queue:
+  max_size: 1000
+
+ingest:
+  enabled: true
+  host: 127.0.0.1
+  port: 8080
+
+privacy:
+  hash_salt: dev-salt
+
+priority:
+  debounce_seconds: 2.0
+  focus_event_types:
+    - os.foreground_changed
+  focus_block_event_type: os.app_focus_block
+  drop_p2_when_queue_over: 0.8

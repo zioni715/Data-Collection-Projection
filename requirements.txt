@@ -1,0 +1,2 @@
+# Core dependency for YAML config parsing.
+PyYAML>=6.0
