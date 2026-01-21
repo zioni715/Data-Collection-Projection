@@ -9,13 +9,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from collector.config import load_config
+from collector.retention import retention_result_json, run_retention
 from collector.store import SQLiteStore
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Initialize collector database")
+    parser = argparse.ArgumentParser(description="Run retention cleanup")
     parser.add_argument(
         "--config", default="configs/config.yaml", help="path to config file"
+    )
+    parser.add_argument(
+        "--force-vacuum",
+        action="store_true",
+        help="force VACUUM regardless of size threshold",
     )
     return parser.parse_args()
 
@@ -30,6 +36,9 @@ def main() -> None:
     )
     store.connect()
     store.migrate(config.migrations_path)
+
+    result = run_retention(store, config.retention, force_vacuum=args.force_vacuum)
+    print(retention_result_json(result))
     store.close()
 
 

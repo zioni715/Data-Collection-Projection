@@ -5,12 +5,18 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from .models import EventEnvelope, PrivacyMetadata, ResourceRef, VALID_PRIORITIES
+
+try:
+    from .observability import Observability
+except ImportError:  # pragma: no cover - optional for test import order
+    Observability = None  # type: ignore
 from .utils.time import parse_ts, utc_now
 
 P0_EVENT_TYPES = {
     "outlook.send_clicked",
     "excel.export_pdf",
     "excel.export_csv",
+    "excel.save_as",
     "os.file_saved",
     "excel.refresh_pivot",
     "upload_done",
@@ -22,6 +28,7 @@ P1_EVENT_TYPES = {
     "os.file_opened",
     "excel.workbook_opened",
     "outlook.compose_started",
+    "outlook.attachment_added_meta",
 }
 
 P2_EVENT_TYPES = {
@@ -48,6 +55,7 @@ class PriorityProcessor:
     focus_event_types: List[str] = field(default_factory=lambda: ["os.foreground_changed"])
     focus_block_event_type: str = "os.app_focus_block"
     drop_p2_when_queue_over: float = 0.8
+    metrics: Optional["Observability"] = None
 
     _last_event_ts: Dict[Tuple[str, str, str], float] = field(default_factory=dict)
     _focus_state: Optional[FocusState] = None
@@ -57,6 +65,8 @@ class PriorityProcessor:
         envelope.priority = _classify_priority(event_type, envelope.priority)
 
         if envelope.priority == "P2" and queue_ratio >= self.drop_p2_when_queue_over:
+            if self.metrics:
+                self.metrics.record_drop("queue_overflow")
             return []
 
         if event_type in self._focus_event_types_set():
@@ -64,6 +74,8 @@ class PriorityProcessor:
 
         if event_type in DEBOUNCE_EVENT_TYPES:
             if self._should_debounce(envelope, event_type):
+                if self.metrics:
+                    self.metrics.record_drop("debounce")
                 return []
 
         return [envelope]

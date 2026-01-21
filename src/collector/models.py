@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 DEFAULT_SCHEMA_VERSION = "1.0"
@@ -38,3 +39,14 @@ class EventEnvelope:
     pid: Optional[int] = None
     window_id: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SessionEvent:
+    ts: datetime
+    event_type: str
+    priority: str
+    app: str
+    resource_type: str
+    resource_id: str
+    payload: Dict[str, Any]

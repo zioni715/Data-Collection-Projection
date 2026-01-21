@@ -10,12 +10,16 @@ hash:
 
 hash_keys:
   - path
+  - file_path
+  - filepath
   - file_name
 
 length_limits:
   window_title: 64
   url: 128
   path: 128
+  file_path: 128
+  filepath: 128
   file_name: 64
 
 url_policy:
@@ -38,7 +42,24 @@ drop_payload_keys:
   - cell_value
   - clipboard
 
-allowlist_apps: []
+allowlist_apps:
+  - os
+  - applicationframehost.exe
+  - chrome.exe
+  - code.exe
+  - discord.exe
+  - excel
+  - excel.exe
+  - kakaotalk.exe
+  - microsoft.notes.exe
+  - msedge.exe
+  - notion.exe
+  - notion calendar.exe
+  - outlook
+  - outlook.exe
+  - systemsettings.exe
+  - textinputhost.exe
+  - whale.exe
 
 # Example denylist: password managers, finance apps, personal messengers.
 denylist_apps:

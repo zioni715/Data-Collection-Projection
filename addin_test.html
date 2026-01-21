@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <meta charset="utf-8">
+  <body>
+    <button id="send">Send</button>
+    <pre id="out"></pre>
+    <script>
+      document.getElementById('send').onclick = () => {
+        fetch("http://127.0.0.1:8080/events", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schema_version: "1.0",
+            source: "excel_addin",
+            app: "EXCEL",
+            event_type: "excel.export_pdf",
+            resource: { type: "file", id: "C:/dummy/path/report.xlsx" },
+            payload: { format: "pdf", sheet_count: 2, file_path: "C:/dummy/path/report.xlsx" }
+          })
+        })
+        .then(r => r.json())
+        .then(data => document.getElementById('out').textContent = JSON.stringify(data, null, 2))
+        .catch(err => document.getElementById('out').textContent = String(err));
+      };
+    </script>
+  </body>
+</html>

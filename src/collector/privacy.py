@@ -8,8 +8,25 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 import yaml
 
 from .models import EventEnvelope, PrivacyMetadata, ResourceRef
+
+try:
+    from .observability import Observability
+except ImportError:  # pragma: no cover - optional for test import order
+    Observability = None  # type: ignore
 from .utils.hashing import hmac_sha256
 from .utils.masking import mask_patterns, sanitize_url, truncate
+
+EMAIL_KEYS = {
+    "recipients",
+    "recipient",
+    "to",
+    "cc",
+    "bcc",
+    "email",
+    "emails",
+}
+
+EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
 @dataclass
@@ -26,13 +43,21 @@ class PrivacyRules:
 
 
 class PrivacyGuard:
-    def __init__(self, rules: PrivacyRules, hash_salt: str) -> None:
+    def __init__(
+        self,
+        rules: PrivacyRules,
+        hash_salt: str,
+        metrics: Optional["Observability"] = None,
+    ) -> None:
         self._rules = rules
         self._hash_salt = hash_salt
+        self._metrics = metrics
 
     def apply(self, envelope: EventEnvelope) -> Optional[EventEnvelope]:
         app_key = (envelope.app or "").lower()
         if self._rules.allowlist_apps and app_key not in self._rules.allowlist_apps:
+            if self._metrics:
+                self._metrics.record_drop("allowlist")
             return None
         if self._rules.denylist_apps and app_key in self._rules.denylist_apps:
             if self._rules.denylist_action == "strip":
@@ -40,7 +65,11 @@ class PrivacyGuard:
                 envelope.privacy.redaction = _dedupe(
                     envelope.privacy.redaction + ["denylist_stripped"]
                 )
+                if self._metrics:
+                    self._metrics.record_privacy_denied()
                 return envelope
+            if self._metrics:
+                self._metrics.record_privacy_denied()
             return None
 
         redactions = list(envelope.privacy.redaction)
@@ -62,6 +91,10 @@ class PrivacyGuard:
             if key_norm in self._rules.drop_payload_keys:
                 redactions.append(f"drop:{key_norm}")
                 continue
+            if key_norm in EMAIL_KEYS:
+                sanitized[key] = _summarize_recipients(value)
+                redactions.append(f"recipients_summarized:{key_norm}")
+                continue
             sanitized[key] = self._sanitize_payload_value(key, value, redactions)
 
         envelope.payload = sanitized
@@ -69,6 +102,8 @@ class PrivacyGuard:
             pii_level=envelope.privacy.pii_level,
             redaction=_dedupe(redactions),
         )
+        if self._metrics and redactions:
+            self._metrics.record_privacy_redacted()
         return envelope
 
     def _sanitize_payload_value(
@@ -172,3 +207,60 @@ def _dedupe(values: Iterable[str]) -> List[str]:
         seen.add(item)
         output.append(item)
     return output
+
+
+def _summarize_recipients(value: Any) -> Dict[str, Any]:
+    emails = _collect_emails(value)
+    if emails:
+        domain_stats: Dict[str, int] = {}
+        for email in emails:
+            domain = _extract_domain(email)
+            if not domain:
+                continue
+            domain_stats[domain] = domain_stats.get(domain, 0) + 1
+        summary: Dict[str, Any] = {"count": len(emails)}
+        if domain_stats:
+            summary["domain_stats"] = domain_stats
+        return summary
+
+    count = _coerce_recipient_count(value)
+    if count is None:
+        return {"count": 0}
+    return {"count": count}
+
+
+def _collect_emails(value: Any) -> List[str]:
+    emails: List[str] = []
+    if isinstance(value, str):
+        emails.extend(EMAIL_PATTERN.findall(value))
+        return emails
+    if isinstance(value, dict):
+        for item in value.values():
+            emails.extend(_collect_emails(item))
+        return emails
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            emails.extend(_collect_emails(item))
+        return emails
+    return emails
+
+
+def _extract_domain(email: str) -> str:
+    parts = email.lower().split("@", 1)
+    if len(parts) != 2:
+        return ""
+    return parts[1].strip()
+
+
+def _coerce_recipient_count(value: Any) -> Optional[int]:
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        return 1 if value.strip() else None
+    if isinstance(value, dict):
+        count = value.get("count")
+        if isinstance(count, (int, float)):
+            return int(count)
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    return None

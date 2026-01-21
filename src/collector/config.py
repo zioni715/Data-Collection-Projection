@@ -14,11 +14,13 @@ class IngestConfig:
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8080
+    token: str = ""
 
 
 @dataclass
 class QueueConfig:
     max_size: int = 1000
+    shutdown_drain_seconds: int = 3
 
 
 @dataclass
@@ -27,11 +29,48 @@ class PrivacyConfig:
 
 
 @dataclass
+class StoreConfig:
+    busy_timeout_ms: int = 5000
+    insert_batch_size: int = 100
+    insert_flush_ms: int = 1000
+    insert_retry_attempts: int = 3
+    insert_retry_backoff_ms: int = 50
+
+
+@dataclass
 class PriorityConfig:
     debounce_seconds: float = 2.0
     focus_event_types: list[str] = field(default_factory=lambda: ["os.foreground_changed"])
     focus_block_event_type: str = "os.app_focus_block"
     drop_p2_when_queue_over: float = 0.8
+
+
+@dataclass
+class RetentionConfig:
+    enabled: bool = True
+    interval_minutes: int = 60
+    raw_events_days: int = 7
+    sessions_days: int = 30
+    routine_candidates_days: int = 90
+    handoff_queue_days: int = 7
+    max_db_mb: int = 500
+    batch_size: int = 5000
+    vacuum_hours: int = 24
+
+
+@dataclass
+class ObservabilityConfig:
+    log_interval_sec: int = 60
+
+
+@dataclass
+class LoggingConfig:
+    dir: Path = PROJECT_ROOT / "logs"
+    file_name: str = "collector.log"
+    max_mb: int = 20
+    backup_count: int = 10
+    json: bool = True
+    to_console: bool = True
 
 
 @dataclass
@@ -45,7 +84,11 @@ class Config:
     ingest: IngestConfig = field(default_factory=IngestConfig)
     queue: QueueConfig = field(default_factory=QueueConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
+    store: StoreConfig = field(default_factory=StoreConfig)
     priority: PriorityConfig = field(default_factory=PriorityConfig)
+    retention: RetentionConfig = field(default_factory=RetentionConfig)
+    observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -64,17 +107,31 @@ def load_config(path: str | Path) -> Config:
     )
 
     ingest_raw = _as_dict(raw.get("ingest"))
+    token_value = ingest_raw.get("token", "")
     ingest = IngestConfig(
         enabled=bool(ingest_raw.get("enabled", True)),
         host=str(ingest_raw.get("host", "127.0.0.1")),
         port=int(ingest_raw.get("port", 8080)),
+        token=str(token_value) if token_value is not None else "",
     )
 
     queue_raw = _as_dict(raw.get("queue"))
-    queue = QueueConfig(max_size=int(queue_raw.get("max_size", 1000)))
+    queue = QueueConfig(
+        max_size=int(queue_raw.get("max_size", 1000)),
+        shutdown_drain_seconds=int(queue_raw.get("shutdown_drain_seconds", 3)),
+    )
 
     privacy_raw = _as_dict(raw.get("privacy"))
     privacy = PrivacyConfig(hash_salt=str(privacy_raw.get("hash_salt", "dev-salt")))
+
+    store_raw = _as_dict(raw.get("store"))
+    store = StoreConfig(
+        busy_timeout_ms=int(store_raw.get("busy_timeout_ms", 5000)),
+        insert_batch_size=int(store_raw.get("insert_batch_size", 100)),
+        insert_flush_ms=int(store_raw.get("insert_flush_ms", 1000)),
+        insert_retry_attempts=int(store_raw.get("insert_retry_attempts", 3)),
+        insert_retry_backoff_ms=int(store_raw.get("insert_retry_backoff_ms", 50)),
+    )
 
     priority_raw = _as_dict(raw.get("priority"))
     focus_event_types = priority_raw.get("focus_event_types", ["os.foreground_changed"])
@@ -91,6 +148,34 @@ def load_config(path: str | Path) -> Config:
         ),
     )
 
+    retention_raw = _as_dict(raw.get("retention"))
+    retention = RetentionConfig(
+        enabled=bool(retention_raw.get("enabled", True)),
+        interval_minutes=int(retention_raw.get("interval_minutes", 60)),
+        raw_events_days=int(retention_raw.get("raw_events_days", 7)),
+        sessions_days=int(retention_raw.get("sessions_days", 30)),
+        routine_candidates_days=int(retention_raw.get("routine_candidates_days", 90)),
+        handoff_queue_days=int(retention_raw.get("handoff_queue_days", 7)),
+        max_db_mb=int(retention_raw.get("max_db_mb", 500)),
+        batch_size=int(retention_raw.get("batch_size", 5000)),
+        vacuum_hours=int(retention_raw.get("vacuum_hours", 24)),
+    )
+
+    observability_raw = _as_dict(raw.get("observability"))
+    observability = ObservabilityConfig(
+        log_interval_sec=int(observability_raw.get("log_interval_sec", 60)),
+    )
+
+    logging_raw = _as_dict(raw.get("logging"))
+    logging_config = LoggingConfig(
+        dir=_resolve_path(logging_raw.get("dir", "logs")),
+        file_name=str(logging_raw.get("file_name", "collector.log")),
+        max_mb=int(logging_raw.get("max_mb", 20)),
+        backup_count=int(logging_raw.get("backup_count", 10)),
+        json=bool(logging_raw.get("json", True)),
+        to_console=bool(logging_raw.get("to_console", True)),
+    )
+
     return Config(
         db_path=db_path,
         migrations_path=migrations_path,
@@ -101,7 +186,11 @@ def load_config(path: str | Path) -> Config:
         ingest=ingest,
         queue=queue,
         privacy=privacy,
+        store=store,
         priority=priority,
+        retention=retention,
+        observability=observability,
+        logging=logging_config,
     )
 
 

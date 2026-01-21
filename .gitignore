@@ -23,6 +23,7 @@ htmlcov/
 collector.db
 
 *.log
+*.log.*
 .DS_Store
 
 .idea/
@@ -32,3 +33,6 @@ build/
 dist/
 *.egg-info/
 .eggs/
+
+logs/
+spool/
