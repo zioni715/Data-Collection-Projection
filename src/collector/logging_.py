@@ -14,9 +14,9 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: Dict[str, Any] = {
-            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z"),
+            "ts": datetime.fromtimestamp(record.created)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M:%S"),
             "level": record.levelname,
             "component": record.name,
             "run_id": self._run_id,
