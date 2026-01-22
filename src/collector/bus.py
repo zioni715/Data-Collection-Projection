@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
@@ -123,6 +124,16 @@ class EventBus:
                     self._metrics.record_priority(output.priority)
                     self._metrics.record_store_insert_ok()
                     self._metrics.set_last_event_ts(output.ts)
+                    self._metrics.record_activity(
+                        output.app, output.event_type, output.payload, output.priority
+                    )
+                    activity_payload = self._metrics.activity_block_payload(
+                        output.app, output.event_type, output.payload
+                    )
+                    if activity_payload:
+                        logger.info(
+                            json.dumps(activity_payload, separators=(",", ":"))
+                        )
         except Exception:
             logger.exception("failed to insert batch")
             if self._metrics:

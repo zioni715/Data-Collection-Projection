@@ -61,6 +61,10 @@ class RetentionConfig:
 @dataclass
 class ObservabilityConfig:
     log_interval_sec: int = 60
+    activity_log: bool = True
+    activity_top_n: int = 3
+    activity_min_duration_sec: int = 5
+    activity_include_title: bool = False
 
 
 @dataclass
@@ -164,6 +168,14 @@ def load_config(path: str | Path) -> Config:
     observability_raw = _as_dict(raw.get("observability"))
     observability = ObservabilityConfig(
         log_interval_sec=int(observability_raw.get("log_interval_sec", 60)),
+        activity_log=bool(observability_raw.get("activity_log", True)),
+        activity_top_n=int(observability_raw.get("activity_top_n", 3)),
+        activity_min_duration_sec=int(
+            observability_raw.get("activity_min_duration_sec", 5)
+        ),
+        activity_include_title=bool(
+            observability_raw.get("activity_include_title", False)
+        ),
     )
 
     logging_raw = _as_dict(raw.get("logging"))

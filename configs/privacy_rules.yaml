@@ -45,8 +45,11 @@ drop_payload_keys:
 allowlist_apps:
   - os
   - applicationframehost.exe
+  - 3dsmax.exe
+  - 7zfm.exe
   - chrome.exe
   - code.exe
+  - devenv.exe
   - discord.exe
   - excel
   - excel.exe
@@ -57,9 +60,16 @@ allowlist_apps:
   - notion calendar.exe
   - outlook
   - outlook.exe
+  - pycharm64.exe
+  - revit.exe
+  - sketchup.exe
+  - unity hub.exe
+  - unity.exe
   - systemsettings.exe
   - textinputhost.exe
+  - windowsterminal.exe
   - whale.exe
+  - zoom.exe
 
 # Example denylist: password managers, finance apps, personal messengers.
 denylist_apps:

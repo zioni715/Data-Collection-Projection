@@ -1,4 +1,4 @@
-db_path: collector.db
+db_path: collector_run2.db
 migrations_path: migrations
 validation_level: lenient
 wal_mode: true
@@ -51,7 +51,7 @@ observability:
   activity_include_title: false
 
 logging:
-  dir: logs
+  dir: logs/run2
   file_name: collector.log
   max_mb: 20
   backup_count: 10

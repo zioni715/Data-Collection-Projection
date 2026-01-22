@@ -189,7 +189,13 @@ def run() -> None:
     store.connect()
     store.migrate(config.migrations_path)
 
-    metrics = Observability(log_interval_sec=config.observability.log_interval_sec)
+    metrics = Observability(
+        log_interval_sec=config.observability.log_interval_sec,
+        activity_log=config.observability.activity_log,
+        activity_top_n=config.observability.activity_top_n,
+        activity_min_duration_sec=config.observability.activity_min_duration_sec,
+        activity_include_title=config.observability.activity_include_title,
+    )
 
     privacy_rules = load_privacy_rules(config.privacy_rules_path)
     privacy_guard = PrivacyGuard(privacy_rules, config.privacy.hash_salt, metrics=metrics)
