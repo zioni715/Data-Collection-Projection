@@ -265,6 +265,7 @@ python scripts\show_focus_titles.py --config configs\config_run2.yaml --since-ho
 4. **일일 리포트 자동 생성** → “어제 한 일” 자동 요약
 5. **로그 분리** (activity log vs access log 분리)
 6. **리소스 스냅샷 기록** (시작/종료 시점 CPU/Memory)
+7. 어떠한 앱을 사용했는지 + **그 앱에서 어떤 활동을 했는지**까지 수집할 수 있는 방안
 
 ---
 
