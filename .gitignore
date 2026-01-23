@@ -25,6 +25,8 @@ collector.db
 *.log
 *.log.*
 .DS_Store
+tmp_*.txt
+tmp_*.csv
 
 .idea/
 .vscode/

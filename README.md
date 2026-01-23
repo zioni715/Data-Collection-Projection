@@ -42,6 +42,12 @@ $env:PYTHONPATH = "src"
 python -m collector.main --config configs\config.yaml
 ```
 
+Run a separate collection (run2 DB/logs):
+```powershell
+$env:PYTHONPATH = "src"
+python -m collector.main --config configs\config_run2.yaml
+```
+
 ## Send a test event (PowerShell)
 ```powershell
 $body = @{
@@ -137,6 +143,23 @@ Health check:
 Invoke-RestMethod http://127.0.0.1:8080/health
 ```
 
+## Allowlist recommendations
+Build allowlist candidates from recent focus usage:
+```powershell
+python scripts\recommend_allowlist.py --days 3 --min-minutes 10 --min-blocks 3
+```
+
+Apply to `configs\privacy_rules.yaml` (auto-backup created):
+```powershell
+python scripts\recommend_allowlist.py --days 3 --min-minutes 10 --min-blocks 3 --apply
+```
+
+## On-demand window title lookup (debug)
+Query focus block titles from the DB when needed (no log noise):
+```powershell
+python scripts\show_focus_titles.py --config configs\config_run2.yaml --since-hours 6 --local-time
+```
+
 ## Config
 Main config: `configs\config.yaml`
 - ingest: host/port/token
@@ -155,6 +178,7 @@ Privacy rules: `configs\privacy_rules.yaml`
 C:\Data-Collection-Projection\
   configs\
     config.yaml                # runtime config (ingest, queue, store, retention, logging)
+    config_run2.yaml           # separate DB/logs config for run2
     privacy_rules.yaml         # masking/hashing/allowlist/denylist rules
   migrations\
     001_init.sql               # events table
@@ -170,6 +194,8 @@ C:\Data-Collection-Projection\
     build_handoff.py           # build handoff package and enqueue
     run_retention.py           # run retention once
     print_stats.py             # fetch /stats
+    recommend_allowlist.py     # suggest allowlist apps from focus usage
+    show_focus_titles.py       # on-demand focus title lookup
     run_core.ps1               # start collector with conda
     install_service.ps1        # Task Scheduler installer
     uninstall_service.ps1      # Task Scheduler remover
@@ -200,6 +226,9 @@ C:\Data-Collection-Projection\
     test_routine.py            # routine candidate tests
   logs\                         # runtime JSON logs (rotated)
   collector.db                  # SQLite database
+  collector_run2.db             # SQLite database for run2
+  First_Logging.md              # first collection report
+  Second_Logging.md             # second collection report
 ```
 
 ## Korean Version
@@ -243,6 +272,12 @@ python scripts\init_db.py
 ```powershell
 $env:PYTHONPATH = "src"
 python -m collector.main --config configs\config.yaml
+```
+
+run2 ?? ??:
+```powershell
+$env:PYTHONPATH = "src"
+python -m collector.main --config configs\config_run2.yaml
 ```
 
 ### 테스트 이벤트 전송 (PowerShell)
@@ -339,6 +374,16 @@ Health 체크:
 Invoke-RestMethod http://127.0.0.1:8080/health
 ```
 
+### allowlist ??
+```powershell
+python scripts\recommend_allowlist.py --days 3 --min-minutes 10 --min-blocks 3
+```
+
+### ??? ??? ??
+```powershell
+python scripts\show_focus_titles.py --config configs\config_run2.yaml --since-hours 6 --local-time
+```
+
 ### 설정
 메인 설정: `configs\config.yaml`
 - ingest: host/port/token
@@ -357,6 +402,7 @@ Invoke-RestMethod http://127.0.0.1:8080/health
 C:\Data-Collection-Projection\
   configs\
     config.yaml                # runtime config (ingest, queue, store, retention, logging)
+    config_run2.yaml           # separate DB/logs config for run2
     privacy_rules.yaml         # masking/hashing/allowlist/denylist rules
   migrations\
     001_init.sql               # events table
@@ -372,6 +418,8 @@ C:\Data-Collection-Projection\
     build_handoff.py           # build handoff package and enqueue
     run_retention.py           # run retention once
     print_stats.py             # fetch /stats
+    recommend_allowlist.py     # suggest allowlist apps from focus usage
+    show_focus_titles.py       # on-demand focus title lookup
     run_core.ps1               # start collector with conda
     install_service.ps1        # Task Scheduler installer
     uninstall_service.ps1      # Task Scheduler remover
@@ -402,4 +450,7 @@ C:\Data-Collection-Projection\
     test_routine.py            # routine candidate tests
   logs\                         # runtime JSON logs (rotated)
   collector.db                  # SQLite database
+  collector_run2.db             # SQLite database for run2
+  First_Logging.md              # first collection report
+  Second_Logging.md             # second collection report
 ```
