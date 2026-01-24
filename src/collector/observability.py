@@ -15,6 +15,9 @@ class Observability:
         activity_top_n: int = 3,
         activity_min_duration_sec: int = 5,
         activity_include_title: bool = False,
+        activity_title_apps: Optional[list[str]] = None,
+        activity_title_max_len: int = 128,
+        timezone_name: str = "local",
     ) -> None:
         self._lock = threading.Lock()
         self._counters: Counter[str] = Counter()
@@ -30,6 +33,13 @@ class Observability:
         self._activity_top_n = max(1, int(activity_top_n))
         self._activity_min_duration_sec = max(0, int(activity_min_duration_sec))
         self._activity_include_title = bool(activity_include_title)
+        self._activity_title_apps = {
+            str(item).lower()
+            for item in (activity_title_apps or [])
+            if str(item).strip()
+        }
+        self._activity_title_max_len = max(0, int(activity_title_max_len))
+        self._tzinfo = _resolve_tz(timezone_name)
 
     def inc(self, name: str, count: int = 1, track_minute: bool = True) -> None:
         if not name:
@@ -114,6 +124,7 @@ class Observability:
         app: str,
         event_type: str,
         payload: Dict[str, Any],
+        start_ts: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         if not self._activity_log:
             return None
@@ -132,10 +143,18 @@ class Observability:
             "duration_sec": int(duration),
             "duration_human": _format_duration(int(duration)),
         }
-        if self._activity_include_title:
+        if start_ts:
+            data["start_ts"] = _format_ts(start_ts, self._tzinfo)
+            end_ts = _add_seconds(start_ts, int(duration), self._tzinfo)
+            if end_ts:
+                data["end_ts"] = end_ts
+        if self._activity_include_title or app_name.lower() in self._activity_title_apps:
             title = payload.get("window_title")
             if isinstance(title, str) and title.strip():
-                data["title_hint"] = title.strip()
+                title_hint = title.strip()
+                if self._activity_title_max_len > 0 and len(title_hint) > self._activity_title_max_len:
+                    title_hint = title_hint[: self._activity_title_max_len]
+                data["title_hint"] = title_hint
         return data
 
     def snapshot(self, db_size_bytes: int) -> Dict[str, Any]:
@@ -179,7 +198,7 @@ class Observability:
             key_events = dict(self._minute_key_events)
             if not top_apps and not key_events:
                 return None
-            minute_ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(self._minute_bucket * 60))
+            minute_ts = _format_epoch(self._minute_bucket * 60, self._tzinfo, with_seconds=False)
         return {
             "event": "activity_minute",
             "minute": minute_ts,
@@ -196,3 +215,62 @@ def _format_duration(seconds: int) -> str:
         return f"{minutes}m {sec:02d}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes:02d}m"
+
+
+def _format_ts(ts_value: str, tzinfo) -> str:
+    try:
+        from .utils.time import parse_ts
+    except Exception:
+        return ts_value
+    parsed = parse_ts(ts_value)
+    if not parsed:
+        return ts_value
+    if tzinfo is None:
+        return time.strftime("%Y-%m-%d %H:%M:%S", parsed.astimezone().timetuple())
+    return time.strftime("%Y-%m-%d %H:%M:%S", parsed.astimezone(tzinfo).timetuple())
+
+
+def _add_seconds(ts_value: str, seconds: int, tzinfo) -> Optional[str]:
+    try:
+        from .utils.time import parse_ts
+    except Exception:
+        return None
+    parsed = parse_ts(ts_value)
+    if not parsed:
+        return None
+    try:
+        from datetime import timedelta
+    except Exception:
+        return None
+    end_ts = parsed + timedelta(seconds=seconds)
+    if tzinfo is None:
+        return time.strftime("%Y-%m-%d %H:%M:%S", end_ts.astimezone().timetuple())
+    return time.strftime("%Y-%m-%d %H:%M:%S", end_ts.astimezone(tzinfo).timetuple())
+
+
+def _resolve_tz(name: str):
+    if not name:
+        return None
+    if str(name).lower() in {"local", "system", "default"}:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+    except Exception:
+        return None
+    try:
+        return ZoneInfo(str(name))
+    except Exception:
+        return None
+
+
+def _format_epoch(epoch_seconds: float, tzinfo, with_seconds: bool = True) -> str:
+    try:
+        from datetime import datetime, timezone
+    except Exception:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch_seconds))
+    if tzinfo is None:
+        dt_value = datetime.fromtimestamp(epoch_seconds).astimezone()
+    else:
+        dt_value = datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).astimezone(tzinfo)
+    fmt = "%Y-%m-%d %H:%M:%S" if with_seconds else "%Y-%m-%d %H:%M"
+    return dt_value.strftime(fmt)

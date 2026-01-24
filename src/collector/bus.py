@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import queue
@@ -18,6 +19,7 @@ except ImportError:  # pragma: no cover - optional for test import order
     Observability = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+activity_logger = logging.getLogger("collector.activity")
 
 
 class EventBus:
@@ -32,6 +34,12 @@ class EventBus:
         insert_flush_ms: int = 1000,
         insert_retry_attempts: int = 3,
         insert_retry_backoff_ms: int = 50,
+        activity_detail_enabled: bool = False,
+        activity_detail_min_duration_sec: int = 5,
+        activity_detail_store_hint: bool = True,
+        activity_detail_hash_salt: str = "",
+        activity_detail_full_title_apps: Optional[list[str]] = None,
+        activity_detail_max_title_len: int = 256,
         metrics: Optional["Observability"] = None,
     ) -> None:
         self._store = store
@@ -48,6 +56,18 @@ class EventBus:
         self._flush_interval = max(0.1, int(insert_flush_ms) / 1000.0)
         self._retry_attempts = max(0, int(insert_retry_attempts))
         self._retry_backoff_ms = max(0, int(insert_retry_backoff_ms))
+        self._activity_detail_enabled = bool(activity_detail_enabled)
+        self._activity_detail_min_duration_sec = max(
+            0, int(activity_detail_min_duration_sec)
+        )
+        self._activity_detail_store_hint = bool(activity_detail_store_hint)
+        self._activity_detail_hash_salt = activity_detail_hash_salt
+        self._activity_detail_full_title_apps = {
+            str(item).lower()
+            for item in (activity_detail_full_title_apps or [])
+            if str(item).strip()
+        }
+        self._activity_detail_max_title_len = max(0, int(activity_detail_max_title_len))
 
     def start(self) -> None:
         self._worker.start()
@@ -119,6 +139,17 @@ class EventBus:
                 retry_attempts=self._retry_attempts,
                 retry_backoff_ms=self._retry_backoff_ms,
             )
+            detail_records: list[tuple[str, str, str, str, str, int]] = []
+            if self._activity_detail_enabled:
+                detail_records = _build_activity_detail_records(
+                    batch,
+                    min_duration_sec=self._activity_detail_min_duration_sec,
+                    store_hint=self._activity_detail_store_hint,
+                    hash_salt=self._activity_detail_hash_salt,
+                    full_title_apps=self._activity_detail_full_title_apps,
+                    max_title_len=self._activity_detail_max_title_len,
+                )
+                self._store.upsert_activity_details(detail_records)
             if self._metrics:
                 for output in batch:
                     self._metrics.record_priority(output.priority)
@@ -128,11 +159,38 @@ class EventBus:
                         output.app, output.event_type, output.payload, output.priority
                     )
                     activity_payload = self._metrics.activity_block_payload(
-                        output.app, output.event_type, output.payload
+                        output.app, output.event_type, output.payload, output.ts
                     )
                     if activity_payload:
                         logger.info(
                             json.dumps(activity_payload, separators=(",", ":"))
+                        )
+                    if (output.event_type or "").lower().startswith("browser."):
+                        browser_payload = _build_browser_activity_payload(output)
+                        if browser_payload:
+                            activity_logger.info(
+                                json.dumps(browser_payload, separators=(",", ":"))
+                            )
+                if detail_records and self._activity_detail_full_title_apps:
+                    for app, title_hash, title_hint, first_ts, last_ts, duration in detail_records:
+                        if app.lower() not in self._activity_detail_full_title_apps:
+                            continue
+                        if not title_hint:
+                            continue
+                        activity_logger.info(
+                            json.dumps(
+                                {
+                                    "event": "activity_detail",
+                                    "app": app,
+                                    "duration_sec": duration,
+                                    "title_hint": title_hint,
+                                    "first_seen_ts": first_ts,
+                                    "last_seen_ts": last_ts,
+                                    "title_hash": title_hash,
+                                    "title_label": _title_label(app, title_hash),
+                                },
+                                separators=(",", ":"),
+                            )
                         )
         except Exception:
             logger.exception("failed to insert batch")
@@ -147,3 +205,98 @@ def _queue_ratio(q: queue.Queue) -> float:
     if maxsize <= 0:
         return 0.0
     return q.qsize() / maxsize
+
+
+def _build_browser_activity_payload(output: Any) -> Optional[Dict[str, Any]]:
+    payload = getattr(output, "payload", {}) or {}
+    title = payload.get("window_title")
+    url = payload.get("url")
+    domain = payload.get("domain")
+    data: Dict[str, Any] = {
+        "event": "browser_activity",
+        "app": getattr(output, "app", "") or "",
+    }
+    if isinstance(title, str) and title.strip():
+        data["title_hint"] = title.strip()
+    if isinstance(url, str) and url.strip():
+        data["url"] = url.strip()
+    if isinstance(domain, str) and domain.strip():
+        data["domain"] = domain.strip()
+    ts_value = getattr(output, "ts", "") or ""
+    if ts_value:
+        data["event_ts"] = ts_value
+    if len(data) <= 2:
+        return None
+    return data
+
+
+def _title_label(app: str, title_hash: str) -> str:
+    app_key = (app or "").split(".", 1)[0].upper() or "APP"
+    code = title_hash
+    try:
+        raw = bytes.fromhex(title_hash)
+        code = base64.b32encode(raw).decode("ascii").rstrip("=")
+    except (ValueError, TypeError):
+        code = title_hash or "UNKNOWN"
+    return f"{app_key}-{code[:8]}"
+
+
+def _build_activity_detail_records(
+    batch: list[Any],
+    *,
+    min_duration_sec: int,
+    store_hint: bool,
+    hash_salt: str,
+    full_title_apps: set[str],
+    max_title_len: int,
+) -> list[tuple[str, str, str, str, str, int]]:
+    if not batch:
+        return []
+    try:
+        from .utils.hashing import hmac_sha256
+    except Exception:
+        return []
+
+    records: list[tuple[str, str, str, str, str, int]] = []
+    for output in batch:
+        event_type = str(getattr(output, "event_type", "") or "").lower()
+        if event_type != "os.app_focus_block":
+            continue
+        payload = getattr(output, "payload", {}) or {}
+        title = payload.get("window_title")
+        duration = payload.get("duration_sec")
+        if not isinstance(duration, (int, float)) or duration < min_duration_sec:
+            continue
+        app = str(getattr(output, "app", "") or "").strip()
+        if not app:
+            continue
+        app_key = app.lower()
+        if app_key in full_title_apps:
+            raw_payload = {}
+            raw = getattr(output, "raw", {}) or {}
+            if isinstance(raw, dict):
+                raw_payload = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
+            raw_title = raw_payload.get("window_title")
+            if isinstance(raw_title, str) and raw_title.strip():
+                title = raw_title
+
+        if not isinstance(title, str) or not title.strip():
+            continue
+
+        title_clean = title.strip()
+        title_hash = hmac_sha256(title_clean, hash_salt or "dev-salt")
+        title_hint = title_clean if store_hint else ""
+        if title_hint and max_title_len > 0 and len(title_hint) > max_title_len:
+            title_hint = title_hint[:max_title_len]
+        ts = str(getattr(output, "ts", "") or "")
+        records.append(
+            (
+                app,
+                title_hash,
+                title_hint,
+                ts,
+                ts,
+                int(duration),
+            )
+        )
+    return records

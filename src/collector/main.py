@@ -177,6 +177,10 @@ def run() -> None:
         backup_count=config.logging.backup_count,
         use_json=config.logging.json,
         to_console=config.logging.to_console,
+        activity_detail_file=config.logging.activity_detail_file,
+        activity_detail_max_mb=config.logging.activity_detail_max_mb,
+        activity_detail_backup_count=config.logging.activity_detail_backup_count,
+        timezone_name=config.logging.timezone,
     )
 
     logger.info("starting collector")
@@ -195,6 +199,9 @@ def run() -> None:
         activity_top_n=config.observability.activity_top_n,
         activity_min_duration_sec=config.observability.activity_min_duration_sec,
         activity_include_title=config.observability.activity_include_title,
+        activity_title_apps=config.observability.activity_title_apps,
+        activity_title_max_len=config.observability.activity_title_max_len,
+        timezone_name=config.logging.timezone,
     )
 
     privacy_rules = load_privacy_rules(config.privacy_rules_path)
@@ -218,6 +225,12 @@ def run() -> None:
         insert_flush_ms=config.store.insert_flush_ms,
         insert_retry_attempts=config.store.insert_retry_attempts,
         insert_retry_backoff_ms=config.store.insert_retry_backoff_ms,
+        activity_detail_enabled=config.activity_detail.enabled,
+        activity_detail_min_duration_sec=config.activity_detail.min_duration_sec,
+        activity_detail_store_hint=config.activity_detail.store_hint,
+        activity_detail_hash_salt=config.privacy.hash_salt,
+        activity_detail_full_title_apps=config.activity_detail.full_title_apps,
+        activity_detail_max_title_len=config.activity_detail.max_title_len,
         metrics=metrics,
     )
     bus.start()

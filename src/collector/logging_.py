@@ -6,17 +6,22 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover - fallback for environments without zoneinfo
+    ZoneInfo = None  # type: ignore
+
 
 class JsonFormatter(logging.Formatter):
-    def __init__(self, run_id: str) -> None:
+    def __init__(self, run_id: str, tzinfo: Optional[timezone] = None) -> None:
         super().__init__()
         self._run_id = run_id
+        self._tzinfo = tzinfo
 
     def format(self, record: logging.LogRecord) -> str:
+        ts = _format_ts(record.created, self._tzinfo)
         payload: Dict[str, Any] = {
-            "ts": datetime.fromtimestamp(record.created)
-            .astimezone()
-            .strftime("%Y-%m-%d %H:%M:%S"),
+            "ts": ts,
             "level": record.levelname,
             "component": record.name,
             "run_id": self._run_id,
@@ -38,7 +43,7 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["error"] = self.formatException(record.exc_info)
 
-        return json.dumps(payload, separators=(",", ":"))
+        return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
 
 def setup_logging(
@@ -50,6 +55,10 @@ def setup_logging(
     backup_count: int = 10,
     use_json: bool = True,
     to_console: bool = True,
+    activity_detail_file: Optional[str] = None,
+    activity_detail_max_mb: int = 20,
+    activity_detail_backup_count: int = 10,
+    timezone_name: str = "local",
     run_id: Optional[str] = None,
 ) -> str:
     run_id = run_id or uuid.uuid4().hex
@@ -58,8 +67,9 @@ def setup_logging(
     for handler in list(root.handlers):
         root.removeHandler(handler)
 
+    tzinfo = _resolve_tz(timezone_name)
     if use_json:
-        formatter: logging.Formatter = JsonFormatter(run_id)
+        formatter = JsonFormatter(run_id, tzinfo=tzinfo)
     else:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -72,6 +82,22 @@ def setup_logging(
         )
         file_handler.setFormatter(formatter)
         root.addHandler(file_handler)
+
+        if activity_detail_file:
+            activity_logger = logging.getLogger("collector.activity")
+            activity_logger.setLevel(root.level)
+            activity_logger.propagate = True
+            for handler in list(activity_logger.handlers):
+                activity_logger.removeHandler(handler)
+            activity_log_path = log_dir / activity_detail_file
+            activity_max_bytes = max(1, int(activity_detail_max_mb)) * 1024 * 1024
+            activity_handler = RotatingFileHandler(
+                activity_log_path,
+                maxBytes=activity_max_bytes,
+                backupCount=max(1, int(activity_detail_backup_count)),
+            )
+            activity_handler.setFormatter(formatter)
+            activity_logger.addHandler(activity_handler)
 
     if to_console or not log_dir:
         console_handler = logging.StreamHandler()
@@ -91,3 +117,30 @@ def _parse_json(message: str) -> Optional[Dict[str, Any]]:
     if isinstance(parsed, dict):
         return parsed
     return None
+
+
+def _resolve_tz(name: str) -> Optional[timezone]:
+    if not name:
+        return None
+    if str(name).lower() in {"local", "system", "default"}:
+        return None
+    if ZoneInfo is None:
+        return None
+    try:
+        return ZoneInfo(str(name))
+    except Exception:
+        return None
+
+
+def _format_ts(epoch_seconds: float, tzinfo: Optional[timezone]) -> str:
+    if tzinfo is None:
+        return (
+            datetime.fromtimestamp(epoch_seconds)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M:%S")
+        )
+    return (
+        datetime.fromtimestamp(epoch_seconds, tz=timezone.utc)
+        .astimezone(tzinfo)
+        .strftime("%Y-%m-%d %H:%M:%S")
+    )

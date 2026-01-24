@@ -119,6 +119,40 @@ class SQLiteStore:
                 sleep_for = (backoff_ms / 1000.0) * (2**attempt)
                 time.sleep(sleep_for)
 
+    def upsert_activity_details(
+        self, records: list[tuple[str, str, str, str, str, int]]
+    ) -> None:
+        if self._conn is None:
+            raise RuntimeError("database is not connected")
+        if not records:
+            return
+        with self._lock:
+            self._conn.executemany(
+                """
+                INSERT INTO activity_details (
+                    app,
+                    title_hash,
+                    title_hint,
+                    first_seen_ts,
+                    last_seen_ts,
+                    total_duration_sec,
+                    blocks
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(app, title_hash) DO UPDATE SET
+                    last_seen_ts = excluded.last_seen_ts,
+                    total_duration_sec = activity_details.total_duration_sec + excluded.total_duration_sec,
+                    blocks = activity_details.blocks + 1,
+                    title_hint = CASE
+                        WHEN activity_details.title_hint IS NULL OR activity_details.title_hint = ''
+                        THEN excluded.title_hint
+                        ELSE activity_details.title_hint
+                    END
+                """,
+                records,
+            )
+            self._conn.commit()
+
     def insert_session(
         self,
         session_id: str,

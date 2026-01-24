@@ -16,14 +16,14 @@
 ---
 
 ## 1. 목적
-로컬 환경에서 **슈퍼 하이퍼 울트라 얼티메이트 슈퍼 짱짱 에이전트**를 만들기 위한  
-**데이터 수집 방법과 파이프라인을 설계·검증**하는 것이 목표
+로컬 환경에서 **“슈퍼 하이퍼 울트라 얼티메이트 슈퍼 짱짱 에이전트”**를 만들기 위한  
+**데이터 수집 방법과 파이프라인을 설계·검증**하는 것이 목표다.
 
-[핵심 목적]
-- 로컬 PC에서 발생하는 업무 이벤트를 **안전하게** 수집/요약
-- 개인 정보가 노출되지 않도록 **privacy guard**를 앞단에서 강제
-- 이벤트를 축약 가능한 형태로 저장해, 이후 **세션/루틴/핸드오프** 등 고도화 단계로 이어지도록 함
-- 장시간 실행 가능하도록 **경량화 + 안정성**을 확보
+핵심 목적은 다음과 같다.
+- 로컬 PC에서 발생하는 업무 이벤트를 **안전하게** 수집/요약한다.
+- 개인 정보가 노출되지 않도록 **privacy guard**를 앞단에서 강제한다.
+- 이벤트를 축약 가능한 형태로 저장해, 이후 **세션/루틴/핸드오프** 등 고도화 단계로 이어지도록 한다.
+- 장시간 실행 가능하도록 **경량화 + 안정성**을 확보한다.
 
 ---
 
@@ -92,31 +92,21 @@ python -m collector.main --config configs\config.yaml
 - 로그/메트릭/리텐션은 별도 스레드에서 지속 수행
 
 ### 3-4. 우선순위(P0/P1/P2) 정의 및 의미
-우선순위는 `src/collector/priority.py`에서 event_type 기준으로 분류
+우선순위는 `src/collector/priority.py`에서 event_type 기준으로 분류된다.
 - **P0 (결정/완료 신호)**: 업무 완료/결정에 가까운 이벤트  
   - 예: `outlook.send_clicked`, `excel.export_pdf`, `excel.export_csv`, `excel.save_as`
-  - 세션화 기준에서 **P0는 세션을 즉시 종료**하는 경계로 사용됨
+  - 세션화 기준에서 **P0는 세션을 즉시 종료**하는 경계로 사용됨.
 - **P1 (일반 활동)**: 핵심 활동이지만 결정 이벤트는 아닌 것  
   - 예: `os.app_focus_block`, `excel.workbook_opened`, `outlook.compose_started`
-  - 사용자 활동 피드와 세션 요약에서 주로 활용됨
+  - 사용자 활동 피드와 세션 요약에서 주로 활용됨.
 - **P2 (노이즈/저우선)**: 빈도가 높고 노이즈 가능성이 큰 이벤트  
   - 예: `os.foreground_changed`, `os.window_title_changed`, `os.clipboard_meta`
-  - 큐가 붐빌 때는 `drop_p2_when_queue_over` 정책으로 자동 드롭됨
+  - 큐가 붐빌 때는 `drop_p2_when_queue_over` 정책으로 자동 드롭됨.
 
 ---
 
 ## 4. 코어 로그 해석
-
-### [실제 로그 예시]
-```bash
-{"ts":"2026-01-23 09:25:13","level":"INFO","component":"__main__","run_id":"68efa064179349459c301e2bfa6033ff","event":"activity_minute","meta":{"event":"activity_minute","minute":"2026-01-23 09:25","top_apps":[["KAKAOTALK.EXE",31]],"key_events":{}}}
-{"ts":"2026-01-23 09:26:13","level":"INFO","component":"__main__","run_id":"68efa064179349459c301e2bfa6033ff","event":"metrics_minute","meta":{"counters":{"ingest.received_total":618,"ingest.ok_total":618,"privacy.redacted_total":547,"priority.p1_total":476,"store.insert_ok_total":476,"pipeline.dropped_total":71,"drop.reason.allowlist":71},"gauges":{"queue.depth":0},"minute":29485466,"minute_counters":{},"db_size_bytes":610304,"last_event_ts":"2026-01-23T00:24:31.042687Z","event":"metrics_minute"}}
-{"ts":"2026-01-23 09:26:52","level":"INFO","component":"__main__","run_id":"68efa064179349459c301e2bfa6033ff","event":"127.0.0.1 - \"POST /events HTTP/1.1\" 200 -"}
-{"ts":"2026-01-23 09:26:52","level":"INFO","component":"collector.bus","run_id":"68efa064179349459c301e2bfa6033ff","event":"activity_block","meta":{"event":"activity_block","app":"KAKAOTALK.EXE","duration_sec":110,"duration_human":"1m 50s"}}
-```
-코어 로그는 JSON line 형식
-
-공통 필드는 다음과 같음
+코어 로그는 JSON line 형식이다. 공통 필드는 다음과 같다.
 
 ### 4-1. 공통 필드
 - `ts`: 로컬 시간 (YYYY-MM-DD HH:MM:SS)
@@ -153,7 +143,7 @@ python -m collector.main --config configs\config.yaml
 ---
 
 ## 5. DB 구조 및 저장 방식
-SQLite 기반이며 migrations로 스키마를 만듦
+SQLite 기반이며 migrations로 스키마를 만든다.
 
 ### 5-1. 주요 테이블
 - `events`
@@ -167,6 +157,8 @@ SQLite 기반이며 migrations로 스키마를 만듦
   - 상위 에이전트에게 전달할 패키지 큐
 - `state`
   - 배치/세션화 진행 위치 저장
+- `activity_details`
+  - 앱 + 제목 힌트 기반 집계 테이블
 
 ### 5-2. 저장 방식
 - WAL 모드로 안정성 확보
@@ -194,7 +186,7 @@ SQLite 기반이며 migrations로 스키마를 만듦
 - DB 증가: 약 0.63 MB / 23.3h → ~0.027 MB/h
 - 로그 증가: 약 0.63 MB / 23.3h → ~0.027 MB/h
 
-→ 하루 수집 기준으로도 **수 MB 이하 수준**으로 안정적
+→ 하루 수집 기준으로도 **수 MB 이하 수준**으로 안정적.
 
 ---
 
@@ -211,9 +203,9 @@ SQLite 기반이며 migrations로 스키마를 만듦
 - privacy redaction 100% 적용 (경로/이메일 패턴 일부 잔존)
 
 **고찰**
-1) 안정성은 확보됨(오류 0건, integrity_check ok)
-2) allowlist가 너무 보수적이면 사용자 활동 로그가 부족해질 수 있음
-3) raw_json 저장은 민감 데이터 잔존 위험 → 정책 재검토 필요 
+1) 안정성은 확보됨(오류 0건, integrity_check ok).  
+2) allowlist가 너무 보수적이면 사용자 활동 로그가 부족해질 수 있음.  
+3) raw_json 저장은 민감 데이터 잔존 위험 → 정책 재검토 필요.  
 
 ---
 
@@ -247,6 +239,16 @@ python scripts\recommend_allowlist.py --days 3 --min-minutes 10 --min-blocks 3 -
 python scripts\show_focus_titles.py --config configs\config_run2.yaml --since-hours 6 --local-time
 ```
 
+### 8-4. 앱 내 활동 수집(세부)
+- `activity_details` 테이블에 앱 + 제목 힌트를 집계
+- 마스킹/길이 제한이 적용된 `window_title` 기반
+- 검색/정렬로 “앱 내 활동 힌트”를 확인 가능
+
+조회 예시:
+```powershell
+python scripts\show_activity_details.py --config configs\config_run2.yaml --order duration --limit 30
+```
+
 ---
 
 ## 9. 고도화/개선 포인트
@@ -265,13 +267,13 @@ python scripts\show_focus_titles.py --config configs\config_run2.yaml --since-ho
 4. **일일 리포트 자동 생성** → “어제 한 일” 자동 요약
 5. **로그 분리** (activity log vs access log 분리)
 6. **리소스 스냅샷 기록** (시작/종료 시점 CPU/Memory)
-7. 어떠한 앱을 사용했는지 + **그 앱에서 어떤 활동을 했는지**까지 수집할 수 있는 방안
+7. **어떤 앱을 사용했는지 + 그 앱에서 어떤 활동을 했는지**까지 수집하는 방향으로 고도화
 
 ---
 
 ## 11. 좀 더 생각해볼 부분 (초개인화 vs 프라이버시)
 이 프로젝트는 초개인화를 목표로 하지만, 개인정보 규제를 단순히 풀기보다  
-**사용자 통제 하에서 필요한 만큼만** 완화하는 방향이 현실적
+**“사용자 통제 하에서 필요한 만큼만” 완화**하는 방향이 현실적이다.
 
 고려해야 할 기준:
 - **명시적 동의/설명**: 처음부터 어떤 데이터가 수집되는지 투명하게 고지
@@ -281,3 +283,4 @@ python scripts\show_focus_titles.py --config configs\config_run2.yaml --since-ho
 - **보관 기간 단축**: 필요한 기간만 저장 후 자동 삭제
 - **감사 가능성**: 언제 어떤 설정으로 수집했는지 기록/점검 가능
 
+결론적으로 “완화”는 무제한이 아니라 **선택적 허용/투명한 통제**의 형태가 되어야 한다.

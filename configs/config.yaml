@@ -49,6 +49,15 @@ observability:
   activity_top_n: 3
   activity_min_duration_sec: 5
   activity_include_title: false
+  activity_title_apps: []
+  activity_title_max_len: 128
+
+activity_detail:
+  enabled: true
+  min_duration_sec: 5
+  store_hint: true
+  full_title_apps: []
+  max_title_len: 256
 
 logging:
   dir: logs
@@ -57,3 +66,4 @@ logging:
   backup_count: 10
   json: true
   to_console: true
+  timezone: Asia/Seoul

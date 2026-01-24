@@ -65,6 +65,8 @@ class ObservabilityConfig:
     activity_top_n: int = 3
     activity_min_duration_sec: int = 5
     activity_include_title: bool = False
+    activity_title_apps: list[str] = field(default_factory=list)
+    activity_title_max_len: int = 128
 
 
 @dataclass
@@ -75,6 +77,19 @@ class LoggingConfig:
     backup_count: int = 10
     json: bool = True
     to_console: bool = True
+    activity_detail_file: str = ""
+    activity_detail_max_mb: int = 20
+    activity_detail_backup_count: int = 10
+    timezone: str = "local"
+
+
+@dataclass
+class ActivityDetailConfig:
+    enabled: bool = False
+    min_duration_sec: int = 5
+    store_hint: bool = True
+    full_title_apps: list[str] = field(default_factory=list)
+    max_title_len: int = 256
 
 
 @dataclass
@@ -93,6 +108,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    activity_detail: ActivityDetailConfig = field(default_factory=ActivityDetailConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -166,6 +182,9 @@ def load_config(path: str | Path) -> Config:
     )
 
     observability_raw = _as_dict(raw.get("observability"))
+    activity_title_apps = observability_raw.get("activity_title_apps", [])
+    if not isinstance(activity_title_apps, list):
+        activity_title_apps = [str(activity_title_apps)]
     observability = ObservabilityConfig(
         log_interval_sec=int(observability_raw.get("log_interval_sec", 60)),
         activity_log=bool(observability_raw.get("activity_log", True)),
@@ -176,6 +195,8 @@ def load_config(path: str | Path) -> Config:
         activity_include_title=bool(
             observability_raw.get("activity_include_title", False)
         ),
+        activity_title_apps=[str(item) for item in activity_title_apps],
+        activity_title_max_len=int(observability_raw.get("activity_title_max_len", 128)),
     )
 
     logging_raw = _as_dict(raw.get("logging"))
@@ -186,6 +207,24 @@ def load_config(path: str | Path) -> Config:
         backup_count=int(logging_raw.get("backup_count", 10)),
         json=bool(logging_raw.get("json", True)),
         to_console=bool(logging_raw.get("to_console", True)),
+        activity_detail_file=str(logging_raw.get("activity_detail_file", "")),
+        activity_detail_max_mb=int(logging_raw.get("activity_detail_max_mb", 20)),
+        activity_detail_backup_count=int(
+            logging_raw.get("activity_detail_backup_count", 10)
+        ),
+        timezone=str(logging_raw.get("timezone", "local")),
+    )
+
+    detail_raw = _as_dict(raw.get("activity_detail"))
+    full_title_apps = detail_raw.get("full_title_apps", [])
+    if not isinstance(full_title_apps, list):
+        full_title_apps = [str(full_title_apps)]
+    activity_detail = ActivityDetailConfig(
+        enabled=bool(detail_raw.get("enabled", False)),
+        min_duration_sec=int(detail_raw.get("min_duration_sec", 5)),
+        store_hint=bool(detail_raw.get("store_hint", True)),
+        full_title_apps=[str(item) for item in full_title_apps],
+        max_title_len=int(detail_raw.get("max_title_len", 256)),
     )
 
     return Config(
@@ -203,6 +242,7 @@ def load_config(path: str | Path) -> Config:
         retention=retention,
         observability=observability,
         logging=logging_config,
+        activity_detail=activity_detail,
     )
 
 
