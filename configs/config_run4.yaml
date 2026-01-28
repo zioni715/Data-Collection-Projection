@@ -1,4 +1,5 @@
-db_path: collector_run3.db
+db_path: collector_run4.db
+summary_db_path: collector_summary_run4.db
 migrations_path: migrations
 validation_level: lenient
 wal_mode: true
@@ -50,6 +51,9 @@ retention:
   sessions_days: 30
   routine_candidates_days: 90
   handoff_queue_days: 7
+  daily_summaries_days: 180
+  pattern_summaries_days: 60
+  llm_inputs_days: 30
   max_db_mb: 500
   batch_size: 5000
   vacuum_hours: 24
@@ -82,8 +86,32 @@ activity_detail:
     - kakaotalk.exe
   max_title_len: 256
 
+post_collection:
+  enabled: true
+  run_daily_summary: true
+  run_pattern_summary: true
+  run_llm_input: true
+  output_dir: logs/run4
+  llm_max_bytes: 8000
+
+llm:
+  enabled: false
+  endpoint: ""
+  api_key_env: LLM_API_KEY
+  model: ""
+  timeout_sec: 20
+  max_tokens: 500
+
+automation:
+  enabled: false
+  dry_run: true
+  allow_actions:
+    - open_app
+    - open_url
+  min_confidence: 0.6
+
 logging:
-  dir: logs/run3
+  dir: logs/run4
   file_name: collector.log
   max_mb: 20
   backup_count: 10

@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - optional for test import order
 
 logger = logging.getLogger(__name__)
 activity_logger = logging.getLogger("collector.activity")
+activity_text_logger = logging.getLogger("collector.activity_text")
 
 
 class EventBus:
@@ -165,11 +166,17 @@ class EventBus:
                         logger.info(
                             json.dumps(activity_payload, separators=(",", ":"))
                         )
+                        activity_text_logger.info(
+                            _format_activity_text(activity_payload)
+                        )
                     if (output.event_type or "").lower().startswith("browser."):
                         browser_payload = _build_browser_activity_payload(output)
                         if browser_payload:
                             activity_logger.info(
                                 json.dumps(browser_payload, separators=(",", ":"))
+                            )
+                            activity_text_logger.info(
+                                _format_activity_text(browser_payload)
                             )
                 if detail_records and self._activity_detail_full_title_apps:
                     for app, title_hash, title_hint, first_ts, last_ts, duration in detail_records:
@@ -186,10 +193,22 @@ class EventBus:
                                     "title_hint": title_hint,
                                     "first_seen_ts": first_ts,
                                     "last_seen_ts": last_ts,
-                                    "title_hash": title_hash,
                                     "title_label": _title_label(app, title_hash),
                                 },
                                 separators=(",", ":"),
+                            )
+                        )
+                        activity_text_logger.info(
+                            _format_activity_text(
+                                {
+                                    "event": "activity_detail",
+                                    "app": app,
+                                    "duration_sec": duration,
+                                    "title_hint": title_hint,
+                                    "first_seen_ts": first_ts,
+                                    "last_seen_ts": last_ts,
+                                    "title_label": _title_label(app, title_hash),
+                                }
                             )
                         )
         except Exception:
@@ -241,6 +260,48 @@ def _title_label(app: str, title_hash: str) -> str:
     return f"{app_key}-{code[:8]}"
 
 
+def _normalize_title(app: str, title: str) -> str:
+    app_key = (app or "").lower()
+    value = title.strip()
+    if app_key == "notion.exe":
+        for suffix in [" - Notion", " – Notion", " — Notion"]:
+            if value.endswith(suffix):
+                value = value[: -len(suffix)].strip()
+                break
+    if app_key == "code.exe":
+        for suffix in [
+            " - Visual Studio Code",
+            " - Visual Studio Code Insiders",
+            " - Code",
+        ]:
+            if value.endswith(suffix):
+                value = value[: -len(suffix)].strip()
+                break
+    return value
+
+
+def _format_activity_text(payload: Dict[str, Any]) -> str:
+    event = payload.get("event", "activity")
+    app = payload.get("app", "")
+    duration = payload.get("duration_sec")
+    title = payload.get("title_hint") or ""
+    url = payload.get("url") or ""
+    domain = payload.get("domain") or ""
+    label = payload.get("title_label") or ""
+    parts = [f"{event} app={app}"]
+    if duration is not None:
+        parts.append(f"duration={duration}s")
+    if label:
+        parts.append(f"label={label}")
+    if title:
+        parts.append(f"title=\"{title}\"")
+    if url:
+        parts.append(f"url=\"{url}\"")
+    elif domain:
+        parts.append(f"domain={domain}")
+    return " | ".join(parts)
+
+
 def _build_activity_detail_records(
     batch: list[Any],
     *,
@@ -283,7 +344,7 @@ def _build_activity_detail_records(
         if not isinstance(title, str) or not title.strip():
             continue
 
-        title_clean = title.strip()
+        title_clean = _normalize_title(app, title.strip())
         title_hash = hmac_sha256(title_clean, hash_salt or "dev-salt")
         title_hint = title_clean if store_hint else ""
         if title_hint and max_title_len > 0 and len(title_hint) > max_title_len:

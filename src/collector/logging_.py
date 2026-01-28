@@ -13,10 +13,16 @@ except Exception:  # pragma: no cover - fallback for environments without zonein
 
 
 class JsonFormatter(logging.Formatter):
-    def __init__(self, run_id: str, tzinfo: Optional[timezone] = None) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        tzinfo: Optional[timezone] = None,
+        include_run_id: bool = True,
+    ) -> None:
         super().__init__()
         self._run_id = run_id
         self._tzinfo = tzinfo
+        self._include_run_id = include_run_id
 
     def format(self, record: logging.LogRecord) -> str:
         ts = _format_ts(record.created, self._tzinfo)
@@ -24,8 +30,9 @@ class JsonFormatter(logging.Formatter):
             "ts": ts,
             "level": record.levelname,
             "component": record.name,
-            "run_id": self._run_id,
         }
+        if self._include_run_id:
+            payload["run_id"] = self._run_id
 
         message = record.getMessage()
         parsed = _parse_json(message)
@@ -58,7 +65,11 @@ def setup_logging(
     activity_detail_file: Optional[str] = None,
     activity_detail_max_mb: int = 20,
     activity_detail_backup_count: int = 10,
+    activity_detail_text_file: Optional[str] = None,
+    activity_detail_text_max_mb: int = 10,
+    activity_detail_text_backup_count: int = 5,
     timezone_name: str = "local",
+    include_run_id: bool = True,
     run_id: Optional[str] = None,
 ) -> str:
     run_id = run_id or uuid.uuid4().hex
@@ -69,7 +80,7 @@ def setup_logging(
 
     tzinfo = _resolve_tz(timezone_name)
     if use_json:
-        formatter = JsonFormatter(run_id, tzinfo=tzinfo)
+        formatter = JsonFormatter(run_id, tzinfo=tzinfo, include_run_id=include_run_id)
     else:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -99,6 +110,22 @@ def setup_logging(
             activity_handler.setFormatter(formatter)
             activity_logger.addHandler(activity_handler)
 
+        if activity_detail_text_file:
+            activity_text_logger = logging.getLogger("collector.activity_text")
+            activity_text_logger.setLevel(root.level)
+            activity_text_logger.propagate = True
+            for handler in list(activity_text_logger.handlers):
+                activity_text_logger.removeHandler(handler)
+            text_log_path = log_dir / activity_detail_text_file
+            text_max_bytes = max(1, int(activity_detail_text_max_mb)) * 1024 * 1024
+            text_handler = RotatingFileHandler(
+                text_log_path,
+                maxBytes=text_max_bytes,
+                backupCount=max(1, int(activity_detail_text_backup_count)),
+            )
+            text_handler.setFormatter(TextFormatter(tzinfo=tzinfo))
+            activity_text_logger.addHandler(text_handler)
+
     if to_console or not log_dir:
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
@@ -117,6 +144,17 @@ def _parse_json(message: str) -> Optional[Dict[str, Any]]:
     if isinstance(parsed, dict):
         return parsed
     return None
+
+
+class TextFormatter(logging.Formatter):
+    def __init__(self, tzinfo: Optional[timezone] = None) -> None:
+        super().__init__()
+        self._tzinfo = tzinfo
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = _format_ts(record.created, self._tzinfo)
+        message = record.getMessage()
+        return f"{ts} {message}"
 
 
 def _resolve_tz(name: str) -> Optional[timezone]:

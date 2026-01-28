@@ -54,6 +54,12 @@ $env:PYTHONPATH = "src"
 python -m collector.main --config configs\config_run3.yaml
 ```
 
+Run a separate collection (run4 DB/logs):
+```powershell
+$env:PYTHONPATH = "src"
+python -m collector.main --config configs\config_run4.yaml
+```
+
 ## Send a test event (PowerShell)
 ```powershell
 $body = @{
@@ -114,6 +120,65 @@ python scripts\build_sessions.py --use-state --gap-minutes 15
 python scripts\build_routines.py --use-state --min-support 2 --n-min 2 --n-max 3
 ```
 
+## Summaries (daily → pattern → LLM input)
+Daily summary:
+```powershell
+python scripts\build_daily_summary.py --config configs\config_run4.yaml --store-db
+```
+
+Pattern summary:
+```powershell
+python scripts\build_pattern_summary.py --summaries-dir logs\run4 --since-days 7 --config configs\config_run4.yaml --store-db
+```
+
+LLM input:
+```powershell
+python scripts\build_llm_input.py --config configs\config_run4.yaml --daily logs\run4\daily_summary_YYYY-MM-DD.json `
+  --pattern logs\run4\pattern_summary.json --output logs\run4\llm_input.json --store-db
+```
+
+## Pattern quality evaluation
+```powershell
+python scripts\evaluate_pattern_quality.py --summaries-dir logs\run4 --output logs\run4\pattern_quality.json
+```
+
+## Mock data for pattern testing
+Generate mock focus blocks:
+```powershell
+python scripts\generate_mock_events.py --days 7 --output tests\fixtures\mock_events_pattern.jsonl
+```
+
+Replay mock events:
+```powershell
+python scripts\replay_events.py --file tests\fixtures\mock_events_pattern.jsonl --endpoint http://127.0.0.1:8080/events --speed fast
+```
+
+## Cold archive (raw preservation)
+Archive raw events:
+```powershell
+python scripts\archive_raw_events.py --config configs\config_run4.yaml --date 2026-01-28 --days 1 --output-dir archive\raw
+```
+
+Build manifest:
+```powershell
+python scripts\archive_manifest.py --archive-dir archive\raw --include-monthly --monthly-dir archive\monthly --output archive\manifest.json
+```
+
+Verify manifest:
+```powershell
+python scripts\verify_archive_manifest.py --manifest archive\manifest.json
+```
+
+Monthly compaction:
+```powershell
+python scripts\compact_archive_monthly.py --archive-dir archive\raw --output-dir archive\monthly --delete-after
+```
+
+Summary DB retention only:
+```powershell
+python scripts\retention_summary_only.py --config configs\config_run4.yaml
+```
+
 ## Service / Task Scheduler (Windows)
 Run the core via PowerShell script:
 ```powershell
@@ -142,6 +207,11 @@ Get-Content .\logs\collector.log -Tail 50 -Wait
 Activity detail logs (run3):
 ```powershell
 Get-Content .\logs\run3\activity_detail.log -Tail 50 -Wait
+```
+
+Activity detail text logs (run3):
+```powershell
+Get-Content .\logs\run3\activity_detail.txt -Tail 50 -Wait
 ```
 
 Stats endpoint:
@@ -177,6 +247,18 @@ Aggregate per-app activity hints (requires activity_detail enabled):
 python scripts\show_activity_details.py --config configs\config_run2.yaml --order duration --limit 30
 ```
 
+## Activity summary report
+Summarize recent activity_details:
+```powershell
+python scripts\summarize_activity.py --config configs\config_run3.yaml --since-hours 24
+```
+
+## Pattern report (hourly)
+Generate hourly usage patterns:
+```powershell
+python scripts\report_patterns.py --config configs\config_run4.yaml --since-days 3 --output reports\pattern_report.md
+```
+
 ## Browser extension (Chrome / Whale)
 For page-level browser activity (URL + title), load the extension:
 - Chrome: open `chrome://extensions`, enable Developer mode, load unpacked
@@ -184,6 +266,9 @@ For page-level browser activity (URL + title), load the extension:
 - Whale: open `whale://extensions`, enable Developer mode, load unpacked
   from `browser_extension\`, and set `BROWSER_APP = "WHALE.EXE"` in
   `browser_extension\background.js`.
+URL mode is controlled in `browser_extension\background.js`:
+- `URL_MODE = "full"` (full URL)
+- `URL_MODE = "domain"` (domain only)
 
 ## Config
 Main config: `configs\config.yaml`
@@ -191,7 +276,9 @@ Main config: `configs\config.yaml`
 - queue: in-memory size and shutdown drain time
 - store: SQLite busy timeout and batch insert behavior
 - retention: cleanup policies and vacuum thresholds
-- logging: JSON log path and rotation
+- logging: JSON log path, rotation, timezone
+- privacy.url_mode: `rules` (use rules file), `full` (keep full URL), `domain` (store domain only)
+- summary_db_path: optional separate SQLite file for summaries
 
 Privacy rules: `configs\privacy_rules.yaml`
 - masking and hashing rules
@@ -205,6 +292,7 @@ C:\Data-Collection-Projection\
     config.yaml                # runtime config (ingest, queue, store, retention, logging)
     config_run2.yaml           # separate DB/logs config for run2
     config_run3.yaml           # separate DB/logs config for run3
+    config_run4.yaml           # separate DB/logs config for run4
     privacy_rules.yaml         # masking/hashing/allowlist/denylist rules
     privacy_rules_run3.yaml    # run3 privacy rules (full URL allowed)
   browser_extension\
@@ -217,17 +305,38 @@ C:\Data-Collection-Projection\
     004_handoff_queue.sql      # handoff_queue table
     005_state.sql              # state cursors for crash-safe batch jobs
     006_activity_details.sql   # activity detail aggregation table
+    007_summaries.sql          # summary tables (daily/pattern/llm)
   scripts\
     init_db.py                 # run migrations
     replay_events.py           # replay jsonl to /events
     build_sessions.py          # build sessions from events
     build_routines.py          # build routine candidates
     build_handoff.py           # build handoff package and enqueue
+    build_daily_summary.py     # daily summary (optional DB storage)
+    build_pattern_summary.py   # pattern summary (weekday/sequence)
+    build_llm_input.py         # LLM input builder (size capped)
+    evaluate_pattern_quality.py # pattern quality report
+    generate_mock_events.py    # mock focus-block generator
+    backfill_summaries.py      # backfill summary JSON into DB
+    retention_summary_only.py  # retention for summary DB only
     run_retention.py           # run retention once
     print_stats.py             # fetch /stats
     recommend_allowlist.py     # suggest allowlist apps from focus usage
     show_focus_titles.py       # on-demand focus title lookup
     show_activity_details.py   # aggregated app activity details
+    summarize_activity.py      # activity_details summary report
+    report_patterns.py         # hourly pattern report
+    archive_raw_events.py      # raw archive to jsonl.gz
+    replay_archive_events.py   # replay archived events
+    archive_manifest.py        # archive manifest (sha256)
+    verify_archive_manifest.py # manifest verification
+    compact_archive_monthly.py # merge daily into monthly
+    archive_daily.ps1          # daily archive job
+    install_archive_task.ps1   # schedule daily archive
+    uninstall_archive_task.ps1 # remove daily archive task
+    archive_monthly.ps1        # monthly compaction job
+    install_archive_monthly_task.ps1  # schedule monthly compaction
+    uninstall_archive_monthly_task.ps1 # remove monthly task
     run_allowlist_recommendation.ps1 # run allowlist recommendation (PowerShell)
     run_core.ps1               # start collector with conda
     install_service.ps1        # Task Scheduler installer
@@ -261,6 +370,9 @@ C:\Data-Collection-Projection\
   collector.db                  # SQLite database
   collector_run2.db             # SQLite database for run2
   collector_run3.db             # SQLite database for run3
+  collector_run4.db             # SQLite database for run4 (raw)
+  collector_summary_run4.db     # SQLite database for run4 (summaries)
+  archive\                       # raw archive storage (jsonl.gz)
   First_Logging.md              # first collection report
   Second_Logging.md             # second collection report
 ```
@@ -381,6 +493,33 @@ python scripts\build_sessions.py --use-state --gap-minutes 15
 python scripts\build_routines.py --use-state --min-support 2 --n-min 2 --n-max 3
 ```
 
+### 요약(일/패턴/LLM 입력)
+```powershell
+python scripts\build_daily_summary.py --config configs\config_run4.yaml --store-db
+python scripts\build_pattern_summary.py --summaries-dir logs\run4 --since-days 7 --config configs\config_run4.yaml --store-db
+python scripts\build_llm_input.py --config configs\config_run4.yaml --daily logs\run4\daily_summary_YYYY-MM-DD.json --pattern logs\run4\pattern_summary.json --output logs\run4\llm_input.json --store-db
+```
+
+### 패턴 품질 평가
+```powershell
+python scripts\evaluate_pattern_quality.py --summaries-dir logs\run4 --output logs\run4\pattern_quality.json
+```
+
+### Mock 데이터 패턴 테스트
+```powershell
+python scripts\generate_mock_events.py --days 7 --output tests\fixtures\mock_events_pattern.jsonl
+python scripts\replay_events.py --file tests\fixtures\mock_events_pattern.jsonl --endpoint http://127.0.0.1:8080/events --speed fast
+```
+
+### Raw 아카이브(장기 보존)
+```powershell
+python scripts\archive_raw_events.py --config configs\config_run4.yaml --date 2026-01-28 --days 1 --output-dir archive\raw
+python scripts\archive_manifest.py --archive-dir archive\raw --include-monthly --monthly-dir archive\monthly --output archive\manifest.json
+python scripts\verify_archive_manifest.py --manifest archive\manifest.json
+python scripts\compact_archive_monthly.py --archive-dir archive\raw --output-dir archive\monthly --delete-after
+python scripts\retention_summary_only.py --config configs\config_run4.yaml
+```
+
 ### 서비스 / Task Scheduler (Windows)
 PowerShell 스크립트로 코어 실행:
 ```powershell
@@ -408,6 +547,11 @@ Get-Content .\logs\collector.log -Tail 50 -Wait
 디테일 로그(run3):
 ```powershell
 Get-Content .\logs\run3\activity_detail.log -Tail 50 -Wait
+```
+
+디테일 텍스트 로그(run3):
+```powershell
+Get-Content .\logs\run3\activity_detail.txt -Tail 50 -Wait
 ```
 
 Stats 조회:
@@ -441,6 +585,9 @@ python scripts\show_activity_details.py --config configs\config_run2.yaml --orde
   경로: `browser_extension\`
 - Whale: `whale://extensions` → 개발자 모드 → 압축해제된 확장 로드
   `browser_extension\background.js`에서 `BROWSER_APP="WHALE.EXE"` 설정
+URL 모드는 `browser_extension\background.js`에서 설정:
+- `URL_MODE = "full"` (전체 URL)
+- `URL_MODE = "domain"` (도메인만)
 
 ### 설정
 메인 설정: `configs\config.yaml`
@@ -449,7 +596,10 @@ python scripts\show_activity_details.py --config configs\config_run2.yaml --orde
 - store: SQLite busy timeout 및 배치 insert
 - retention: 정리 정책 및 vacuum 주기
 - logging: 로그 파일/로테이션/타임존
+ - summary_db_path: 요약 전용 SQLite 파일 (raw DB 분리)
 
 프라이버시 규칙: `configs\privacy_rules.yaml`
 - 마스킹/해시/allowlist/denylist
 - URL 정리 및 redaction 패턴
+추가 옵션:
+- privacy.url_mode: `rules`(기본), `full`(전체 URL 저장), `domain`(도메인만 저장)

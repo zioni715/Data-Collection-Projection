@@ -55,14 +55,30 @@ class PriorityProcessor:
     focus_event_types: List[str] = field(default_factory=lambda: ["os.foreground_changed"])
     focus_block_event_type: str = "os.app_focus_block"
     drop_p2_when_queue_over: float = 0.8
+    p0_event_types: List[str] = field(default_factory=list)
+    p1_event_types: List[str] = field(default_factory=list)
+    p2_event_types: List[str] = field(default_factory=list)
     metrics: Optional["Observability"] = None
 
     _last_event_ts: Dict[Tuple[str, str, str], float] = field(default_factory=dict)
     _focus_state: Optional[FocusState] = None
+    _p0_set: set[str] = field(init=False, default_factory=set)
+    _p1_set: set[str] = field(init=False, default_factory=set)
+    _p2_set: set[str] = field(init=False, default_factory=set)
+
+    def __post_init__(self) -> None:
+        self._p0_set = {item.lower() for item in P0_EVENT_TYPES}
+        self._p1_set = {item.lower() for item in P1_EVENT_TYPES}
+        self._p2_set = {item.lower() for item in P2_EVENT_TYPES}
+        self._p0_set.update({str(item).lower() for item in self.p0_event_types})
+        self._p1_set.update({str(item).lower() for item in self.p1_event_types})
+        self._p2_set.update({str(item).lower() for item in self.p2_event_types})
 
     def process(self, envelope: EventEnvelope, queue_ratio: float) -> List[EventEnvelope]:
         event_type = (envelope.event_type or "").lower()
-        envelope.priority = _classify_priority(event_type, envelope.priority)
+        envelope.priority = _classify_priority(
+            event_type, envelope.priority, self._p0_set, self._p1_set, self._p2_set
+        )
 
         if envelope.priority == "P2" and queue_ratio >= self.drop_p2_when_queue_over:
             if self.metrics:
@@ -128,7 +144,9 @@ class PriorityProcessor:
             source=prev.envelope.source,
             app=prev.envelope.app,
             event_type=self.focus_block_event_type,
-            priority=_classify_priority(self.focus_block_event_type, "P1"),
+            priority=_classify_priority(
+                self.focus_block_event_type, "P1", self._p0_set, self._p1_set, self._p2_set
+            ),
             resource=ResourceRef(
                 type=prev.envelope.resource.type,
                 id=prev.envelope.resource.id,
@@ -146,12 +164,14 @@ class PriorityProcessor:
         return [block_event]
 
 
-def _classify_priority(event_type: str, current: str) -> str:
-    if event_type in P0_EVENT_TYPES:
+def _classify_priority(
+    event_type: str, current: str, p0_set: set[str], p1_set: set[str], p2_set: set[str]
+) -> str:
+    if event_type in p0_set:
         return "P0"
-    if event_type in P1_EVENT_TYPES:
+    if event_type in p1_set:
         return "P1"
-    if event_type in P2_EVENT_TYPES:
+    if event_type in p2_set:
         return "P2"
     if current in VALID_PRIORITIES:
         return current

@@ -26,6 +26,7 @@ class QueueConfig:
 @dataclass
 class PrivacyConfig:
     hash_salt: str = "dev-salt"
+    url_mode: str = "rules"
 
 
 @dataclass
@@ -43,6 +44,9 @@ class PriorityConfig:
     focus_event_types: list[str] = field(default_factory=lambda: ["os.foreground_changed"])
     focus_block_event_type: str = "os.app_focus_block"
     drop_p2_when_queue_over: float = 0.8
+    p0_event_types: list[str] = field(default_factory=list)
+    p1_event_types: list[str] = field(default_factory=list)
+    p2_event_types: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -53,6 +57,9 @@ class RetentionConfig:
     sessions_days: int = 30
     routine_candidates_days: int = 90
     handoff_queue_days: int = 7
+    daily_summaries_days: int = 180
+    pattern_summaries_days: int = 60
+    llm_inputs_days: int = 30
     max_db_mb: int = 500
     batch_size: int = 5000
     vacuum_hours: int = 24
@@ -80,7 +87,11 @@ class LoggingConfig:
     activity_detail_file: str = ""
     activity_detail_max_mb: int = 20
     activity_detail_backup_count: int = 10
+    activity_detail_text_file: str = ""
+    activity_detail_text_max_mb: int = 10
+    activity_detail_text_backup_count: int = 5
     timezone: str = "local"
+    include_run_id: bool = True
 
 
 @dataclass
@@ -93,8 +104,38 @@ class ActivityDetailConfig:
 
 
 @dataclass
+class PostCollectionConfig:
+    enabled: bool = False
+    run_daily_summary: bool = True
+    run_pattern_summary: bool = True
+    run_llm_input: bool = True
+    output_dir: str = ""
+    llm_max_bytes: int = 8000
+
+
+@dataclass
+class LLMConfig:
+    enabled: bool = False
+    endpoint: str = ""
+    api_key_env: str = "LLM_API_KEY"
+    model: str = ""
+    timeout_sec: int = 20
+    max_tokens: int = 500
+
+
+@dataclass
+class AutomationConfig:
+    enabled: bool = False
+    dry_run: bool = True
+    allow_actions: list[str] = field(default_factory=list)
+    min_confidence: float = 0.6
+
+
+@dataclass
 class Config:
+    config_path: Path
     db_path: Path
+    summary_db_path: Path | None
     migrations_path: Path
     validation_level: str = "lenient"
     wal_mode: bool = True
@@ -109,6 +150,9 @@ class Config:
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     activity_detail: ActivityDetailConfig = field(default_factory=ActivityDetailConfig)
+    post_collection: PostCollectionConfig = field(default_factory=PostCollectionConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    automation: AutomationConfig = field(default_factory=AutomationConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -121,6 +165,8 @@ def load_config(path: str | Path) -> Config:
         raise ValueError("config root must be a mapping")
 
     db_path = _resolve_path(raw.get("db_path", "collector.db"))
+    summary_db_path = raw.get("summary_db_path", "")
+    summary_db_path = _resolve_path(summary_db_path) if summary_db_path else None
     migrations_path = _resolve_path(raw.get("migrations_path", "migrations"))
     privacy_rules_path = _resolve_path(
         raw.get("privacy_rules_path", "configs/privacy_rules.yaml")
@@ -142,7 +188,10 @@ def load_config(path: str | Path) -> Config:
     )
 
     privacy_raw = _as_dict(raw.get("privacy"))
-    privacy = PrivacyConfig(hash_salt=str(privacy_raw.get("hash_salt", "dev-salt")))
+    privacy = PrivacyConfig(
+        hash_salt=str(privacy_raw.get("hash_salt", "dev-salt")),
+        url_mode=str(privacy_raw.get("url_mode", "rules")),
+    )
 
     store_raw = _as_dict(raw.get("store"))
     store = StoreConfig(
@@ -157,6 +206,15 @@ def load_config(path: str | Path) -> Config:
     focus_event_types = priority_raw.get("focus_event_types", ["os.foreground_changed"])
     if not isinstance(focus_event_types, list):
         focus_event_types = [str(focus_event_types)]
+    p0_event_types = priority_raw.get("p0_event_types", [])
+    if not isinstance(p0_event_types, list):
+        p0_event_types = [str(p0_event_types)]
+    p1_event_types = priority_raw.get("p1_event_types", [])
+    if not isinstance(p1_event_types, list):
+        p1_event_types = [str(p1_event_types)]
+    p2_event_types = priority_raw.get("p2_event_types", [])
+    if not isinstance(p2_event_types, list):
+        p2_event_types = [str(p2_event_types)]
     priority = PriorityConfig(
         debounce_seconds=float(priority_raw.get("debounce_seconds", 2.0)),
         focus_event_types=[str(item) for item in focus_event_types],
@@ -166,6 +224,9 @@ def load_config(path: str | Path) -> Config:
         drop_p2_when_queue_over=float(
             priority_raw.get("drop_p2_when_queue_over", 0.8)
         ),
+        p0_event_types=[str(item) for item in p0_event_types],
+        p1_event_types=[str(item) for item in p1_event_types],
+        p2_event_types=[str(item) for item in p2_event_types],
     )
 
     retention_raw = _as_dict(raw.get("retention"))
@@ -176,6 +237,9 @@ def load_config(path: str | Path) -> Config:
         sessions_days=int(retention_raw.get("sessions_days", 30)),
         routine_candidates_days=int(retention_raw.get("routine_candidates_days", 90)),
         handoff_queue_days=int(retention_raw.get("handoff_queue_days", 7)),
+        daily_summaries_days=int(retention_raw.get("daily_summaries_days", 180)),
+        pattern_summaries_days=int(retention_raw.get("pattern_summaries_days", 60)),
+        llm_inputs_days=int(retention_raw.get("llm_inputs_days", 30)),
         max_db_mb=int(retention_raw.get("max_db_mb", 500)),
         batch_size=int(retention_raw.get("batch_size", 5000)),
         vacuum_hours=int(retention_raw.get("vacuum_hours", 24)),
@@ -212,7 +276,15 @@ def load_config(path: str | Path) -> Config:
         activity_detail_backup_count=int(
             logging_raw.get("activity_detail_backup_count", 10)
         ),
+        activity_detail_text_file=str(logging_raw.get("activity_detail_text_file", "")),
+        activity_detail_text_max_mb=int(
+            logging_raw.get("activity_detail_text_max_mb", 10)
+        ),
+        activity_detail_text_backup_count=int(
+            logging_raw.get("activity_detail_text_backup_count", 5)
+        ),
         timezone=str(logging_raw.get("timezone", "local")),
+        include_run_id=bool(logging_raw.get("include_run_id", True)),
     )
 
     detail_raw = _as_dict(raw.get("activity_detail"))
@@ -227,8 +299,41 @@ def load_config(path: str | Path) -> Config:
         max_title_len=int(detail_raw.get("max_title_len", 256)),
     )
 
+    post_raw = _as_dict(raw.get("post_collection"))
+    post_collection = PostCollectionConfig(
+        enabled=bool(post_raw.get("enabled", False)),
+        run_daily_summary=bool(post_raw.get("run_daily_summary", True)),
+        run_pattern_summary=bool(post_raw.get("run_pattern_summary", True)),
+        run_llm_input=bool(post_raw.get("run_llm_input", True)),
+        output_dir=str(post_raw.get("output_dir", "")),
+        llm_max_bytes=int(post_raw.get("llm_max_bytes", 8000)),
+    )
+
+    llm_raw = _as_dict(raw.get("llm"))
+    llm = LLMConfig(
+        enabled=bool(llm_raw.get("enabled", False)),
+        endpoint=str(llm_raw.get("endpoint", "")),
+        api_key_env=str(llm_raw.get("api_key_env", "LLM_API_KEY")),
+        model=str(llm_raw.get("model", "")),
+        timeout_sec=int(llm_raw.get("timeout_sec", 20)),
+        max_tokens=int(llm_raw.get("max_tokens", 500)),
+    )
+
+    automation_raw = _as_dict(raw.get("automation"))
+    allow_actions = automation_raw.get("allow_actions", [])
+    if not isinstance(allow_actions, list):
+        allow_actions = [str(allow_actions)]
+    automation = AutomationConfig(
+        enabled=bool(automation_raw.get("enabled", False)),
+        dry_run=bool(automation_raw.get("dry_run", True)),
+        allow_actions=[str(item) for item in allow_actions],
+        min_confidence=float(automation_raw.get("min_confidence", 0.6)),
+    )
+
     return Config(
+        config_path=config_path,
         db_path=db_path,
+        summary_db_path=summary_db_path,
         migrations_path=migrations_path,
         validation_level=str(raw.get("validation_level", "lenient")),
         wal_mode=bool(raw.get("wal_mode", True)),
@@ -243,6 +348,9 @@ def load_config(path: str | Path) -> Config:
         observability=observability,
         logging=logging_config,
         activity_detail=activity_detail,
+        post_collection=post_collection,
+        llm=llm,
+        automation=automation,
     )
 
 

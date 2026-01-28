@@ -4,8 +4,11 @@ import argparse
 import json
 import logging
 import signal
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List
 
@@ -180,7 +183,11 @@ def run() -> None:
         activity_detail_file=config.logging.activity_detail_file,
         activity_detail_max_mb=config.logging.activity_detail_max_mb,
         activity_detail_backup_count=config.logging.activity_detail_backup_count,
+        activity_detail_text_file=config.logging.activity_detail_text_file,
+        activity_detail_text_max_mb=config.logging.activity_detail_text_max_mb,
+        activity_detail_text_backup_count=config.logging.activity_detail_text_backup_count,
         timezone_name=config.logging.timezone,
+        include_run_id=config.logging.include_run_id,
     )
 
     logger.info("starting collector")
@@ -205,13 +212,21 @@ def run() -> None:
     )
 
     privacy_rules = load_privacy_rules(config.privacy_rules_path)
-    privacy_guard = PrivacyGuard(privacy_rules, config.privacy.hash_salt, metrics=metrics)
+    privacy_guard = PrivacyGuard(
+        privacy_rules,
+        config.privacy.hash_salt,
+        url_mode=config.privacy.url_mode,
+        metrics=metrics,
+    )
 
     priority = PriorityProcessor(
         debounce_seconds=config.priority.debounce_seconds,
         focus_event_types=config.priority.focus_event_types,
         focus_block_event_type=config.priority.focus_block_event_type,
         drop_p2_when_queue_over=config.priority.drop_p2_when_queue_over,
+        p0_event_types=config.priority.p0_event_types,
+        p1_event_types=config.priority.p1_event_types,
+        p2_event_types=config.priority.p2_event_types,
         metrics=metrics,
     )
 
@@ -321,7 +336,99 @@ def run() -> None:
         if retention_thread is not None:
             retention_thread.join(timeout=5)
         store.close()
+        _run_post_collection(config)
         logger.info("collector stopped")
+
+
+def _run_post_collection(config) -> None:
+    if not getattr(config, "post_collection", None):
+        return
+    post = config.post_collection
+    if not post.enabled:
+        return
+
+    project_root = Path(__file__).resolve().parents[2]
+    scripts_dir = project_root / "scripts"
+    python_exe = sys.executable
+
+    output_dir = str(Path(post.output_dir or config.logging.dir))
+
+    logger.info("post_collection starting")
+    try:
+        if post.run_daily_summary:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "build_daily_summary.py"),
+                "--config",
+                str(config.config_path),
+                "--store-db",
+            ]
+            subprocess.run(cmd, check=False)
+        if post.run_pattern_summary:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "build_pattern_summary.py"),
+                "--summaries-dir",
+                output_dir,
+                "--since-days",
+                "7",
+                "--config",
+                str(config.config_path),
+                "--store-db",
+            ]
+            subprocess.run(cmd, check=False)
+        if post.run_llm_input:
+            # Best-effort: pick latest daily_summary in output_dir.
+            daily_path = ""
+            daily_files = sorted(Path(output_dir).glob("daily_summary_*.json"))
+            if daily_files:
+                daily_path = str(daily_files[-1])
+            pattern_path = str(Path(output_dir) / "pattern_summary.json")
+            cmd = [
+                python_exe,
+                str(scripts_dir / "build_llm_input.py"),
+                "--config",
+                str(config.config_path),
+                "--daily",
+                daily_path or "",
+                "--pattern",
+                pattern_path,
+                "--output",
+                str(Path(output_dir) / "llm_input.json"),
+                "--max-bytes",
+                str(int(post.llm_max_bytes)),
+                "--store-db",
+            ]
+            subprocess.run(cmd, check=False)
+            cmd = [
+                python_exe,
+                str(scripts_dir / "generate_recommendations.py"),
+                "--config",
+                str(config.config_path),
+                "--input",
+                str(Path(output_dir) / "llm_input.json"),
+                "--output-md",
+                str(Path(output_dir) / "activity_recommendations.md"),
+                "--output-json",
+                str(Path(output_dir) / "activity_recommendations.json"),
+            ]
+            subprocess.run(cmd, check=False)
+        if getattr(config, "automation", None) and config.automation.enabled:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "execute_recommendations.py"),
+                "--input",
+                str(Path(output_dir) / "activity_recommendations.json"),
+                "--allow",
+                ",".join(config.automation.allow_actions),
+            ]
+            if config.automation.dry_run:
+                cmd.append("--dry-run")
+            subprocess.run(cmd, check=False)
+    except Exception:
+        logger.exception("post_collection failed")
+    else:
+        logger.info("post_collection finished")
 
 
 if __name__ == "__main__":

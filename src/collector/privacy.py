@@ -47,10 +47,12 @@ class PrivacyGuard:
         self,
         rules: PrivacyRules,
         hash_salt: str,
+        url_mode: str = "rules",
         metrics: Optional["Observability"] = None,
     ) -> None:
         self._rules = rules
         self._hash_salt = hash_salt
+        self._url_mode = str(url_mode or "rules").lower()
         self._metrics = metrics
 
     def apply(self, envelope: EventEnvelope) -> Optional[EventEnvelope]:
@@ -121,6 +123,12 @@ class PrivacyGuard:
                 keep_domain_only = bool(
                     self._rules.url_policy.get("keep_domain_only", True)
                 )
+                if self._url_mode == "full":
+                    allow_full = True
+                    keep_domain_only = False
+                elif self._url_mode == "domain":
+                    allow_full = False
+                    keep_domain_only = True
                 if not allow_full:
                     value = sanitize_url(value, keep_domain_only=keep_domain_only)
                     redactions.append("url_sanitized")

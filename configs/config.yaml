@@ -17,6 +17,7 @@ ingest:
 
 privacy:
   hash_salt: dev-salt
+  url_mode: rules
 
 store:
   busy_timeout_ms: 5000

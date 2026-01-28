@@ -151,7 +151,7 @@ class Observability:
         if self._activity_include_title or app_name.lower() in self._activity_title_apps:
             title = payload.get("window_title")
             if isinstance(title, str) and title.strip():
-                title_hint = title.strip()
+                title_hint = _normalize_title(app_name, title.strip())
                 if self._activity_title_max_len > 0 and len(title_hint) > self._activity_title_max_len:
                     title_hint = title_hint[: self._activity_title_max_len]
                 data["title_hint"] = title_hint
@@ -274,3 +274,23 @@ def _format_epoch(epoch_seconds: float, tzinfo, with_seconds: bool = True) -> st
         dt_value = datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).astimezone(tzinfo)
     fmt = "%Y-%m-%d %H:%M:%S" if with_seconds else "%Y-%m-%d %H:%M"
     return dt_value.strftime(fmt)
+
+
+def _normalize_title(app: str, title: str) -> str:
+    app_key = (app or "").lower()
+    value = title.strip()
+    if app_key == "notion.exe":
+        for suffix in [" - Notion", " – Notion", " — Notion"]:
+            if value.endswith(suffix):
+                value = value[: -len(suffix)].strip()
+                break
+    if app_key == "code.exe":
+        for suffix in [
+            " - Visual Studio Code",
+            " - Visual Studio Code Insiders",
+            " - Code",
+        ]:
+            if value.endswith(suffix):
+                value = value[: -len(suffix)].strip()
+                break
+    return value

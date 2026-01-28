@@ -17,6 +17,9 @@ class RetentionResult:
     deleted_routines: int = 0
     deleted_handoff: int = 0
     expired_handoff: int = 0
+    deleted_daily_summaries: int = 0
+    deleted_pattern_summaries: int = 0
+    deleted_llm_inputs: int = 0
     db_size_before: int = 0
     db_size_after: int = 0
     vacuumed: bool = False
@@ -57,6 +60,24 @@ def run_retention(
             cutoff, batch_size=policy.batch_size
         )
 
+    if policy.daily_summaries_days > 0:
+        cutoff = _format_ts(now - timedelta(days=policy.daily_summaries_days))
+        result.deleted_daily_summaries = store.delete_old_daily_summaries(
+            cutoff, batch_size=policy.batch_size
+        )
+
+    if policy.pattern_summaries_days > 0:
+        cutoff = _format_ts(now - timedelta(days=policy.pattern_summaries_days))
+        result.deleted_pattern_summaries = store.delete_old_pattern_summaries(
+            cutoff, batch_size=policy.batch_size
+        )
+
+    if policy.llm_inputs_days > 0:
+        cutoff = _format_ts(now - timedelta(days=policy.llm_inputs_days))
+        result.deleted_llm_inputs = store.delete_old_llm_inputs(
+            cutoff, batch_size=policy.batch_size
+        )
+
     store.checkpoint_wal()
     db_size_after = store.get_db_size()
     result.db_size_after = db_size_after
@@ -77,6 +98,9 @@ def retention_result_json(result: RetentionResult) -> str:
         "deleted_routines": result.deleted_routines,
         "deleted_handoff": result.deleted_handoff,
         "expired_handoff": result.expired_handoff,
+        "deleted_daily_summaries": result.deleted_daily_summaries,
+        "deleted_pattern_summaries": result.deleted_pattern_summaries,
+        "deleted_llm_inputs": result.deleted_llm_inputs,
         "db_size_before": result.db_size_before,
         "db_size_after": result.db_size_after,
         "vacuumed": result.vacuumed,

@@ -194,7 +194,7 @@ class SQLiteStore:
         confidence: float,
         last_seen_ts: str,
         evidence_session_ids: str,
-    ) -> None:
+        ) -> None:
         if self._conn is None:
             raise RuntimeError("database is not connected")
         with self._lock:
@@ -218,6 +218,75 @@ class SQLiteStore:
                     last_seen_ts,
                     evidence_session_ids,
                 ),
+            )
+            self._conn.commit()
+
+    def upsert_daily_summary(
+        self,
+        date_local: str,
+        start_utc: str,
+        end_utc: str,
+        payload_json: str,
+        created_at: str,
+    ) -> None:
+        if self._conn is None:
+            raise RuntimeError("database is not connected")
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO daily_summaries (
+                    date_local,
+                    start_utc,
+                    end_utc,
+                    payload_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(date_local) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    start_utc = excluded.start_utc,
+                    end_utc = excluded.end_utc,
+                    created_at = excluded.created_at
+                """,
+                (date_local, start_utc, end_utc, payload_json, created_at),
+            )
+            self._conn.commit()
+
+    def insert_pattern_summary(
+        self, created_at: str, window_days: int, payload_json: str
+    ) -> None:
+        if self._conn is None:
+            raise RuntimeError("database is not connected")
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO pattern_summaries (
+                    created_at,
+                    window_days,
+                    payload_json
+                )
+                VALUES (?, ?, ?)
+                """,
+                (created_at, window_days, payload_json),
+            )
+            self._conn.commit()
+
+    def insert_llm_input(
+        self, created_at: str, payload_json: str, payload_size: int
+    ) -> None:
+        if self._conn is None:
+            raise RuntimeError("database is not connected")
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO llm_inputs (
+                    created_at,
+                    payload_json,
+                    payload_size
+                )
+                VALUES (?, ?, ?)
+                """,
+                (created_at, payload_json, payload_size),
             )
             self._conn.commit()
 
@@ -467,6 +536,21 @@ class SQLiteStore:
     def delete_old_handoff(self, cutoff_ts: str, batch_size: int = 0) -> int:
         return self._delete_by_cutoff(
             "handoff_queue", "created_at", cutoff_ts, batch_size=batch_size
+        )
+
+    def delete_old_daily_summaries(self, cutoff_ts: str, batch_size: int = 0) -> int:
+        return self._delete_by_cutoff(
+            "daily_summaries", "created_at", cutoff_ts, batch_size=batch_size
+        )
+
+    def delete_old_pattern_summaries(self, cutoff_ts: str, batch_size: int = 0) -> int:
+        return self._delete_by_cutoff(
+            "pattern_summaries", "created_at", cutoff_ts, batch_size=batch_size
+        )
+
+    def delete_old_llm_inputs(self, cutoff_ts: str, batch_size: int = 0) -> int:
+        return self._delete_by_cutoff(
+            "llm_inputs", "created_at", cutoff_ts, batch_size=batch_size
         )
 
     def _delete_by_cutoff(
