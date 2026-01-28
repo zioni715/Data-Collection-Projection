@@ -27,6 +27,12 @@ store:
   insert_retry_attempts: 3
   insert_retry_backoff_ms: 50
 
+encryption:
+  enabled: true
+  key_env: DATA_COLLECTOR_ENC_KEY
+  key_path: secrets/collector_key.txt
+  encrypt_raw_json: true
+
 priority:
   debounce_seconds: 2.0
   focus_event_types:
@@ -85,6 +91,30 @@ activity_detail:
     - whale.exe
     - kakaotalk.exe
   max_title_len: 256
+
+sensors:
+  auto_start: true
+  processes:
+    - module: sensors.os.windows_foreground
+      args:
+        - --ingest-url
+        - http://127.0.0.1:8080/events
+        - --poll
+        - "1"
+    - module: sensors.os.windows_idle
+      args:
+        - --ingest-url
+        - http://127.0.0.1:8080/events
+        - --idle-threshold
+        - "10"
+        - --poll
+        - "1"
+    - module: sensors.os.file_watcher
+      args:
+        - --ingest-url
+        - http://127.0.0.1:8080/events
+        - --paths
+        - C:\collector_test
 
 post_collection:
   enabled: true

@@ -3,6 +3,7 @@ mask_keys:
   - url
   - path
   - file_name
+  - content_summary
 
 hash:
   algorithm: sha256
@@ -21,6 +22,7 @@ length_limits:
   file_path: 128
   filepath: 128
   file_name: 64
+  content_summary: 256
 
 url_policy:
   allow_full_url: false

@@ -39,6 +39,14 @@ class StoreConfig:
 
 
 @dataclass
+class EncryptionConfig:
+    enabled: bool = False
+    key_env: str = "DATA_COLLECTOR_ENC_KEY"
+    key_path: str = ""
+    encrypt_raw_json: bool = False
+
+
+@dataclass
 class PriorityConfig:
     debounce_seconds: float = 2.0
     focus_event_types: list[str] = field(default_factory=lambda: ["os.foreground_changed"])
@@ -104,6 +112,19 @@ class ActivityDetailConfig:
 
 
 @dataclass
+class SensorProcessConfig:
+    module: str = ""
+    args: list[str] = field(default_factory=list)
+    enabled: bool = True
+
+
+@dataclass
+class SensorsConfig:
+    auto_start: bool = False
+    processes: list[SensorProcessConfig] = field(default_factory=list)
+
+
+@dataclass
 class PostCollectionConfig:
     enabled: bool = False
     run_daily_summary: bool = True
@@ -145,11 +166,13 @@ class Config:
     queue: QueueConfig = field(default_factory=QueueConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
+    encryption: EncryptionConfig = field(default_factory=EncryptionConfig)
     priority: PriorityConfig = field(default_factory=PriorityConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     activity_detail: ActivityDetailConfig = field(default_factory=ActivityDetailConfig)
+    sensors: SensorsConfig = field(default_factory=SensorsConfig)
     post_collection: PostCollectionConfig = field(default_factory=PostCollectionConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     automation: AutomationConfig = field(default_factory=AutomationConfig)
@@ -200,6 +223,17 @@ def load_config(path: str | Path) -> Config:
         insert_flush_ms=int(store_raw.get("insert_flush_ms", 1000)),
         insert_retry_attempts=int(store_raw.get("insert_retry_attempts", 3)),
         insert_retry_backoff_ms=int(store_raw.get("insert_retry_backoff_ms", 50)),
+    )
+
+    encryption_raw = _as_dict(raw.get("encryption"))
+    key_path = str(encryption_raw.get("key_path", "")).strip()
+    if key_path:
+        key_path = str(_resolve_path(key_path))
+    encryption = EncryptionConfig(
+        enabled=bool(encryption_raw.get("enabled", False)),
+        key_env=str(encryption_raw.get("key_env", "DATA_COLLECTOR_ENC_KEY")),
+        key_path=key_path,
+        encrypt_raw_json=bool(encryption_raw.get("encrypt_raw_json", False)),
     )
 
     priority_raw = _as_dict(raw.get("priority"))
@@ -299,6 +333,34 @@ def load_config(path: str | Path) -> Config:
         max_title_len=int(detail_raw.get("max_title_len", 256)),
     )
 
+    sensors_raw = _as_dict(raw.get("sensors"))
+    process_items = sensors_raw.get("processes", []) or []
+    processes: list[SensorProcessConfig] = []
+    if isinstance(process_items, list):
+        for item in process_items:
+            if not isinstance(item, dict):
+                continue
+            module = str(item.get("module", "")).strip()
+            if not module:
+                continue
+            raw_args = item.get("args", []) or []
+            args: list[str] = []
+            if isinstance(raw_args, list):
+                args = [str(arg) for arg in raw_args]
+            elif isinstance(raw_args, str):
+                args = [raw_args]
+            processes.append(
+                SensorProcessConfig(
+                    module=module,
+                    args=args,
+                    enabled=bool(item.get("enabled", True)),
+                )
+            )
+    sensors = SensorsConfig(
+        auto_start=bool(sensors_raw.get("auto_start", False)),
+        processes=processes,
+    )
+
     post_raw = _as_dict(raw.get("post_collection"))
     post_collection = PostCollectionConfig(
         enabled=bool(post_raw.get("enabled", False)),
@@ -343,11 +405,13 @@ def load_config(path: str | Path) -> Config:
         queue=queue,
         privacy=privacy,
         store=store,
+        encryption=encryption,
         priority=priority,
         retention=retention,
         observability=observability,
         logging=logging_config,
         activity_detail=activity_detail,
+        sensors=sensors,
         post_collection=post_collection,
         llm=llm,
         automation=automation,

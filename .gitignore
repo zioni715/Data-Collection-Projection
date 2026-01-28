@@ -41,3 +41,6 @@ dist/
 logs/
 spool/
 archive/
+
+secrets/
+*.key

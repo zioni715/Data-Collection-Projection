@@ -7,7 +7,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .config import EncryptionConfig
 from .models import EventEnvelope
+from .utils.crypto import encrypt_text, load_key, wrap_encrypted
 
 
 class SQLiteStore:
@@ -16,12 +18,19 @@ class SQLiteStore:
         db_path: Path,
         wal_mode: bool = True,
         busy_timeout_ms: int = 5000,
+        encryption: EncryptionConfig | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.wal_mode = wal_mode
         self.busy_timeout_ms = max(0, int(busy_timeout_ms))
         self._conn: Optional[sqlite3.Connection] = None
         self._lock = threading.Lock()
+        self._encryption = encryption or EncryptionConfig()
+        self._enc_key = (
+            load_key(self._encryption.key_env, self._encryption.key_path)
+            if self._encryption.enabled
+            else None
+        )
 
     def connect(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +73,14 @@ class SQLiteStore:
             payload_json = json.dumps(envelope.payload, separators=(",", ":"))
             privacy_json = json.dumps(envelope.privacy.__dict__, separators=(",", ":"))
             raw_json = json.dumps(envelope.raw or {}, separators=(",", ":"))
+            if self._encryption.enabled and self._encryption.encrypt_raw_json:
+                if not self._enc_key:
+                    raise ValueError(
+                        "encryption enabled but key missing: "
+                        f"set {self._encryption.key_env}"
+                    )
+                token = encrypt_text(raw_json, self._enc_key)
+                raw_json = wrap_encrypted(token)
             rows.append(
                 (
                     envelope.schema_version,

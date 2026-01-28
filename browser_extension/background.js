@@ -4,8 +4,10 @@ const SOURCE = "browser_extension";
 const EVENT_TYPE = "browser.tab_active";
 const URL_MODE = "full"; // "full" or "domain"
 const MIN_INTERVAL_MS = 1500;
+const CONTENT_CAPTURE = true;
 
 const lastSent = new Map();
+const lastContent = new Map();
 
 function isHttpUrl(url) {
   return typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"));
@@ -40,6 +42,10 @@ function shouldSend(tabId, signature) {
 }
 
 function sendTab(tab) {
+  sendTabWithContent(tab);
+}
+
+async function sendTabWithContent(tab) {
   if (!tab || !isHttpUrl(tab.url)) {
     return;
   }
@@ -51,6 +57,29 @@ function sendTab(tab) {
   const tabId = tab.id ?? "unknown";
   if (!shouldSend(tabId, signature)) {
     return;
+  }
+
+  let contentPayload = null;
+  if (CONTENT_CAPTURE) {
+    try {
+      contentPayload = await chrome.tabs.sendMessage(tabId, {
+        type: "COLLECT_CONTENT",
+        url: tab.url,
+      });
+    } catch {
+      contentPayload = null;
+    }
+  }
+  if (contentPayload && contentPayload.ok) {
+    const prev = lastContent.get(tabId);
+    const contentSignature = `${contentPayload.content_summary || ""}|${contentPayload.content_len || 0}`;
+    if (prev && prev.signature === contentSignature) {
+      contentPayload = null;
+    } else {
+      lastContent.set(tabId, { signature: contentSignature, ts: Date.now() });
+    }
+  } else {
+    contentPayload = null;
   }
 
   const event = {
@@ -65,6 +94,11 @@ function sendTab(tab) {
       domain: domain,
     },
   };
+  if (contentPayload) {
+    event.payload.content_summary = contentPayload.content_summary || "";
+    event.payload.content = contentPayload.content || "";
+    event.payload.content_len = contentPayload.content_len || 0;
+  }
 
   fetch(ENDPOINT, {
     method: "POST",

@@ -96,6 +96,16 @@
 - CLI 미리보기 옵션 강화
   - `--menu --preview --preview-template`
 
+## 10-1) Chrome/Notion 상세 수집 확장
+- 브라우저 확장에 **콘텐츠 요약/본문 추출** 추가
+  - `browser_extension/content.js` 추가
+  - `content_summary` + `content` 전송
+- 개인정보 보호를 위해 **payload에서는 content 제거** 유지
+  - full content는 `raw_json`에만 남도록 유지
+- run3/run4 설정에서 **암호화 토글 추가**
+  - 현재는 “복호화 번거로움” 때문에 **암호화 비활성 상태**
+  - 필요 시 `encryption.enabled: true`로 재활성화
+
 ## 11) 회의 체크리스트
 - [ ] 데이터 수집 지속 + Mock 데이터 기반 패턴 파악 시작
 - [x] DB 로그 줄 수 축소 전략 확정
@@ -136,4 +146,21 @@
 - 스케줄러 등록
   - `scripts/install_archive_task.ps1`
   - `scripts/install_archive_monthly_task.ps1`
+
+## 16) 센서 자동 시작 (코어 실행 시 동시 구동)
+- `sensors.auto_start` + `sensors.processes` 설정으로 코어가 센서 프로세스를 자동 실행
+- 현재 run4 기준 기본 등록:
+  - `sensors.os.windows_foreground`
+  - `sensors.os.windows_idle`
+  - `sensors.os.file_watcher`
+
+## 17) 암호화 키 파일 자동 로드
+- `encryption.key_path` 지원 추가
+- `secrets/collector_key.txt`에 키 저장 시 자동 로드
+- 환경변수가 없어도 암호화 동작 가능
+
+## 18) 브라우저 상세 수집 확장
+- `browser_extension/content.js`로 본문/요약 추출
+- payload에는 `content_summary`만 남기고
+- full content는 `raw_json`에만 저장 (암호화 ON 기준)
 

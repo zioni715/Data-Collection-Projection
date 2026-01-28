@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import signal
 import subprocess
 import sys
@@ -196,6 +197,7 @@ def run() -> None:
         config.db_path,
         wal_mode=config.wal_mode,
         busy_timeout_ms=config.store.busy_timeout_ms,
+        encryption=config.encryption,
     )
     store.connect()
     store.migrate(config.migrations_path)
@@ -272,6 +274,10 @@ def run() -> None:
     else:
         logger.info("ingest disabled")
 
+    sensor_processes: list[subprocess.Popen] = []
+    if config.ingest.enabled:
+        sensor_processes = _start_sensors(config)
+
     stop_event = threading.Event()
     retention_thread: threading.Thread | None = None
 
@@ -306,6 +312,7 @@ def run() -> None:
         stop_event.set()
         if server is not None:
             server.shutdown()
+        _stop_sensors(sensor_processes)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -332,6 +339,7 @@ def run() -> None:
             server.server_close()
         if server_thread is not None:
             server_thread.join(timeout=5)
+        _stop_sensors(sensor_processes)
         bus.stop(drain_seconds=config.queue.shutdown_drain_seconds)
         if retention_thread is not None:
             retention_thread.join(timeout=5)
@@ -429,6 +437,56 @@ def _run_post_collection(config) -> None:
         logger.exception("post_collection failed")
     else:
         logger.info("post_collection finished")
+
+
+def _start_sensors(config) -> list[subprocess.Popen]:
+    sensors = []
+    sensor_cfg = getattr(config, "sensors", None)
+    if not sensor_cfg or not sensor_cfg.auto_start:
+        return sensors
+    project_root = Path(__file__).resolve().parents[2]
+    for proc_cfg in sensor_cfg.processes:
+        if not proc_cfg.enabled:
+            continue
+        module = (proc_cfg.module or "").strip()
+        if not module:
+            continue
+        cmd = [sys.executable, "-m", module]
+        if proc_cfg.args:
+            cmd.extend(proc_cfg.args)
+        env = os.environ.copy()
+        py_path = env.get("PYTHONPATH", "")
+        src_path = str(project_root / "src")
+        if src_path not in py_path.split(os.pathsep):
+            env["PYTHONPATH"] = os.pathsep.join(
+                [src_path] + ([py_path] if py_path else [])
+            )
+        try:
+            proc = subprocess.Popen(cmd, cwd=str(project_root), env=env)
+            sensors.append(proc)
+            logger.info("sensor started: %s", " ".join(cmd))
+        except Exception:
+            logger.exception("failed to start sensor: %s", module)
+    return sensors
+
+
+def _stop_sensors(sensor_processes: list[subprocess.Popen]) -> None:
+    if not sensor_processes:
+        return
+    for proc in sensor_processes:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except Exception:
+            logger.exception("failed to terminate sensor")
+    for proc in sensor_processes:
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                logger.exception("failed to kill sensor")
 
 
 if __name__ == "__main__":

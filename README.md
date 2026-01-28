@@ -60,6 +60,19 @@ $env:PYTHONPATH = "src"
 python -m collector.main --config configs\config_run4.yaml
 ```
 
+Auto-start sensors (optional, via config):
+```yaml
+sensors:
+  auto_start: true
+  processes:
+    - module: sensors.os.windows_foreground
+      args: ["--ingest-url","http://127.0.0.1:8080/events","--poll","1"]
+    - module: sensors.os.windows_idle
+      args: ["--ingest-url","http://127.0.0.1:8080/events","--idle-threshold","10","--poll","1"]
+    - module: sensors.os.file_watcher
+      args: ["--ingest-url","http://127.0.0.1:8080/events","--paths","C:\\collector_test"]
+```
+
 ## Send a test event (PowerShell)
 ```powershell
 $body = @{
@@ -260,7 +273,7 @@ python scripts\report_patterns.py --config configs\config_run4.yaml --since-days
 ```
 
 ## Browser extension (Chrome / Whale)
-For page-level browser activity (URL + title), load the extension:
+For page-level browser activity (URL + title + optional content summary), load the extension:
 - Chrome: open `chrome://extensions`, enable Developer mode, load unpacked
   from `browser_extension\`.
 - Whale: open `whale://extensions`, enable Developer mode, load unpacked
@@ -269,16 +282,45 @@ For page-level browser activity (URL + title), load the extension:
 URL mode is controlled in `browser_extension\background.js`:
 - `URL_MODE = "full"` (full URL)
 - `URL_MODE = "domain"` (domain only)
+Content capture is controlled in `browser_extension\content.js`:
+- `DOMAIN_ALLOWLIST` to restrict domains (use `["*"]` for all)
+- content is sent as `content_summary` + `content` (full text), and full text is
+  stored only in `raw_json` (run4 enables encryption by default; you can disable it).
 
 ## Config
 Main config: `configs\config.yaml`
 - ingest: host/port/token
 - queue: in-memory size and shutdown drain time
 - store: SQLite busy timeout and batch insert behavior
+- encryption: optional at-rest encryption for raw_json (requires env key)
 - retention: cleanup policies and vacuum thresholds
 - logging: JSON log path, rotation, timezone
 - privacy.url_mode: `rules` (use rules file), `full` (keep full URL), `domain` (store domain only)
 - summary_db_path: optional separate SQLite file for summaries
+
+### Encryption (raw_json at rest)
+Set an encryption key and enable in config (recommended for detailed content capture):
+```powershell
+# Generate a key
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# Set env var for current PowerShell session
+$env:DATA_COLLECTOR_ENC_KEY = "<paste_generated_key>"
+```
+Then enable in config (example in `configs\config_run4.yaml`):
+```yaml
+encryption:
+  enabled: true
+  key_env: DATA_COLLECTOR_ENC_KEY
+  key_path: secrets/collector_key.txt  # optional file fallback
+  encrypt_raw_json: true
+```
+To store the key in a file (auto-loaded if env is missing):
+```powershell
+mkdir secrets | Out-Null
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" | `
+  Set-Content secrets\collector_key.txt
+```
 
 Privacy rules: `configs\privacy_rules.yaml`
 - masking and hashing rules
@@ -465,6 +507,12 @@ $env:PYTHONPATH = "src"
 python -m sensors.os.file_watcher --ingest-url "http://127.0.0.1:8080/events" --paths "C:\collector_test"
 ```
 
+센서를 따로 실행하지 않고 싶다면, config에 `sensors.auto_start`를 켜면
+코어 실행 시 자동으로 센서 프로세스를 띄워줍니다.
+
+If you prefer a single command, enable `sensors.auto_start` in the config and
+the core will spawn these sensor processes automatically.
+
 ### 리플레이(센서 없이 이벤트 주입)
 ```powershell
 python scripts\replay_events.py --file tests\fixtures\sample_events_os_short.jsonl `
@@ -580,7 +628,7 @@ python scripts\show_activity_details.py --config configs\config_run2.yaml --orde
 ```
 
 ### 브라우저 확장 (Chrome / Whale)
-브라우저 페이지 단위 활동(URL + title)을 수집하려면 확장을 로드합니다.
+브라우저 페이지 단위 활동(URL + title + 선택적 content summary)을 수집하려면 확장을 로드합니다.
 - Chrome: `chrome://extensions` → 개발자 모드 → 압축해제된 확장 로드
   경로: `browser_extension\`
 - Whale: `whale://extensions` → 개발자 모드 → 압축해제된 확장 로드
@@ -588,15 +636,44 @@ python scripts\show_activity_details.py --config configs\config_run2.yaml --orde
 URL 모드는 `browser_extension\background.js`에서 설정:
 - `URL_MODE = "full"` (전체 URL)
 - `URL_MODE = "domain"` (도메인만)
+콘텐츠 수집은 `browser_extension\content.js`에서 제어:
+- `DOMAIN_ALLOWLIST`로 도메인 제한 (전체 수집은 `["*"]`)
+- content는 `content_summary` + `content`로 전송되며, full content는
+  `raw_json`에만 저장됨 (run4는 암호화 기본 ON, 필요 시 OFF 가능)
 
 ### 설정
 메인 설정: `configs\config.yaml`
 - ingest: host/port/token
 - queue: 인메모리 큐 크기와 종료 드레인 시간
 - store: SQLite busy timeout 및 배치 insert
+- encryption: raw_json 저장 시 암호화(환경변수 키 필요)
 - retention: 정리 정책 및 vacuum 주기
 - logging: 로그 파일/로테이션/타임존
  - summary_db_path: 요약 전용 SQLite 파일 (raw DB 분리)
+
+### 암호화 (raw_json at rest)
+상세 내용 저장 시에는 raw_json 암호화를 권장합니다.
+```powershell
+# 키 생성
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# 현재 세션 환경변수 설정
+$env:DATA_COLLECTOR_ENC_KEY = "<생성된 키>"
+```
+`configs\config_run4.yaml` 예시:
+```yaml
+encryption:
+  enabled: true  # 암호화 사용 시 true
+  key_env: DATA_COLLECTOR_ENC_KEY
+  key_path: secrets/collector_key.txt  # 환경변수 없을 때 파일 사용
+  encrypt_raw_json: true
+```
+키를 파일에 저장해 자동 로드하려면:
+```powershell
+mkdir secrets | Out-Null
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" | `
+  Set-Content secrets\collector_key.txt
+```
 
 프라이버시 규칙: `configs\privacy_rules.yaml`
 - 마스킹/해시/allowlist/denylist
