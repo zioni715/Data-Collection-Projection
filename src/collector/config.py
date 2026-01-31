@@ -100,6 +100,7 @@ class LoggingConfig:
     activity_detail_text_backup_count: int = 5
     timezone: str = "local"
     include_run_id: bool = True
+    prune_days: int = 0
 
 
 @dataclass
@@ -127,11 +128,20 @@ class SensorsConfig:
 @dataclass
 class PostCollectionConfig:
     enabled: bool = False
+    run_sessions: bool = False
+    run_routines: bool = False
+    run_handoff: bool = False
     run_daily_summary: bool = True
     run_pattern_summary: bool = True
     run_llm_input: bool = True
+    run_pattern_report: bool = False
     output_dir: str = ""
     llm_max_bytes: int = 8000
+    session_gap_minutes: int = 15
+    routine_days: int = 7
+    routine_min_support: int = 2
+    routine_n_min: int = 2
+    routine_n_max: int = 3
 
 
 @dataclass
@@ -319,6 +329,7 @@ def load_config(path: str | Path) -> Config:
         ),
         timezone=str(logging_raw.get("timezone", "local")),
         include_run_id=bool(logging_raw.get("include_run_id", True)),
+        prune_days=int(logging_raw.get("prune_days", 0)),
     )
 
     detail_raw = _as_dict(raw.get("activity_detail"))
@@ -364,11 +375,20 @@ def load_config(path: str | Path) -> Config:
     post_raw = _as_dict(raw.get("post_collection"))
     post_collection = PostCollectionConfig(
         enabled=bool(post_raw.get("enabled", False)),
+        run_sessions=bool(post_raw.get("run_sessions", False)),
+        run_routines=bool(post_raw.get("run_routines", False)),
+        run_handoff=bool(post_raw.get("run_handoff", False)),
         run_daily_summary=bool(post_raw.get("run_daily_summary", True)),
         run_pattern_summary=bool(post_raw.get("run_pattern_summary", True)),
         run_llm_input=bool(post_raw.get("run_llm_input", True)),
+        run_pattern_report=bool(post_raw.get("run_pattern_report", False)),
         output_dir=str(post_raw.get("output_dir", "")),
         llm_max_bytes=int(post_raw.get("llm_max_bytes", 8000)),
+        session_gap_minutes=int(post_raw.get("session_gap_minutes", 15)),
+        routine_days=int(post_raw.get("routine_days", 7)),
+        routine_min_support=int(post_raw.get("routine_min_support", 2)),
+        routine_n_min=int(post_raw.get("routine_n_min", 2)),
+        routine_n_max=int(post_raw.get("routine_n_max", 3)),
     )
 
     llm_raw = _as_dict(raw.get("llm"))

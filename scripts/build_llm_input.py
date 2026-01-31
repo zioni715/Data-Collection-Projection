@@ -14,9 +14,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-top-apps", type=int, default=5)
     parser.add_argument("--max-patterns", type=int, default=8)
     parser.add_argument("--max-titles", type=int, default=5)
+    parser.add_argument("--max-title-len", type=int, default=60)
     parser.add_argument("--max-weekday-patterns", type=int, default=5)
     parser.add_argument("--max-sequences", type=int, default=5)
+    parser.add_argument("--max-transitions", type=int, default=5)
     parser.add_argument("--max-bytes", type=int, default=8000)
+    parser.add_argument("--no-redact-sensitive", action="store_false", dest="redact_sensitive")
     parser.add_argument(
         "--config",
         default="",
@@ -33,6 +36,7 @@ def parse_args() -> argparse.Namespace:
         help="hour filter, e.g. 9-18 or 9,10,11",
     )
     parser.add_argument("--store-db", action="store_true", help="store input in DB")
+    parser.set_defaults(redact_sensitive=True)
     return parser.parse_args()
 
 
@@ -62,10 +66,13 @@ def main() -> None:
         max_top_apps=args.max_top_apps,
         max_patterns=args.max_patterns,
         max_titles=args.max_titles,
+        max_title_len=args.max_title_len,
         max_weekday_patterns=args.max_weekday_patterns,
         max_sequences=args.max_sequences,
+        max_transitions=args.max_transitions,
         include_apps=include_apps,
         include_hours=include_hours,
+        redact_sensitive=args.redact_sensitive,
     )
 
     output = _compress_payload(output, max_bytes=args.max_bytes)
@@ -89,10 +96,13 @@ def _build_payload(
     max_top_apps: int,
     max_patterns: int,
     max_titles: int,
+    max_title_len: int,
     max_weekday_patterns: int,
     max_sequences: int,
+    max_transitions: int,
     include_apps: set[str],
     include_hours: set[int],
+    redact_sensitive: bool,
 ) -> dict:
     top_apps = daily.get("top_apps") or []
     if include_apps:
@@ -102,7 +112,16 @@ def _build_payload(
     top_titles = daily.get("top_titles") or []
     if include_apps:
         top_titles = [item for item in top_titles if item.get("app") in include_apps]
-    top_titles = top_titles[: max_titles]
+    sanitized_titles = []
+    for item in top_titles:
+        title = str(item.get("title_hint") or "").strip()
+        if not title:
+            continue
+        if redact_sensitive and _contains_sensitive(title):
+            continue
+        title = _trim_title(title, max_title_len)
+        sanitized_titles.append({**item, "title_hint": title})
+    top_titles = sanitized_titles[: max_titles]
 
     hourly_patterns = pattern.get("patterns") or []
     if include_hours:
@@ -132,6 +151,18 @@ def _build_payload(
         ]
     sequence_patterns = sequence_patterns[: max_sequences]
 
+    transition_patterns = pattern.get("transition_patterns") or []
+    if include_apps:
+        transition_patterns = [
+            item
+            for item in transition_patterns
+            if item.get("from") in include_apps or item.get("to") in include_apps
+        ]
+    transition_patterns = transition_patterns[: max_transitions]
+
+    time_bucket_patterns = pattern.get("time_bucket_patterns") or {}
+    focus_block_stats = pattern.get("focus_block_stats") or {}
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "date_local": daily.get("date_local"),
@@ -141,6 +172,9 @@ def _build_payload(
         "hourly_patterns": hourly_patterns,
         "weekday_patterns": weekday_patterns,
         "sequence_patterns": sequence_patterns,
+        "transition_patterns": transition_patterns,
+        "time_bucket_patterns": time_bucket_patterns,
+        "focus_block_stats": focus_block_stats,
         "notes": [
             "Use hourly_patterns to infer likely activities at specific times.",
             "top_titles are masked/normalized hints, not raw content.",
@@ -168,10 +202,15 @@ def _compress_payload(payload: dict, *, max_bytes: int) -> dict:
         compact.get("weekday_patterns") or {}, 3
     )
     compact["sequence_patterns"] = (compact.get("sequence_patterns") or [])[:3]
+    compact["transition_patterns"] = (compact.get("transition_patterns") or [])[:3]
+    compact["focus_block_stats"] = compact.get("focus_block_stats") or {}
     if _size(compact) <= max_bytes:
         return compact
 
     compact["hourly_patterns"] = (compact.get("hourly_patterns") or [])[:3]
+    compact["transition_patterns"] = []
+    compact["time_bucket_patterns"] = {}
+    compact["focus_block_stats"] = {}
     compact["key_events"] = {}
     compact["notes"] = ["compressed: reduced lists for size limit"]
     return compact
@@ -268,6 +307,28 @@ def _parse_hours(value: str) -> set[int]:
             except ValueError:
                 continue
     return hours
+
+
+def _contains_sensitive(value: str) -> bool:
+    import re
+
+    if re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", value):
+        return True
+    if re.search(r"[A-Za-z]:\\\\|/Users/|/home/|/Volumes/", value):
+        return True
+    if re.search(r"https?://", value):
+        return True
+    if re.search(r"\\b\\d{12,}\\b", value):
+        return True
+    return False
+
+
+def _trim_title(value: str, max_len: int) -> str:
+    if max_len <= 0:
+        return value
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 1] + "…"
 
 
 if __name__ == "__main__":

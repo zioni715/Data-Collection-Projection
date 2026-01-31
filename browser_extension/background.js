@@ -98,6 +98,8 @@ async function sendTabWithContent(tab) {
     event.payload.content_summary = contentPayload.content_summary || "";
     event.payload.content = contentPayload.content || "";
     event.payload.content_len = contentPayload.content_len || 0;
+  } else if (title) {
+    event.payload.content_summary = title;
   }
 
   fetch(ENDPOINT, {

@@ -70,6 +70,7 @@ def setup_logging(
     activity_detail_text_backup_count: int = 5,
     timezone_name: str = "local",
     include_run_id: bool = True,
+    prune_days: int = 0,
     run_id: Optional[str] = None,
 ) -> str:
     run_id = run_id or uuid.uuid4().hex
@@ -86,6 +87,8 @@ def setup_logging(
 
     if log_dir:
         log_dir.mkdir(parents=True, exist_ok=True)
+        if prune_days and prune_days > 0:
+            _prune_logs(log_dir, prune_days)
         log_path = log_dir / log_file
         max_bytes = max(1, int(max_mb)) * 1024 * 1024
         file_handler = RotatingFileHandler(
@@ -182,3 +185,14 @@ def _format_ts(epoch_seconds: float, tzinfo: Optional[timezone]) -> str:
         .astimezone(tzinfo)
         .strftime("%Y-%m-%d %H:%M:%S")
     )
+
+
+def _prune_logs(log_dir: Path, prune_days: int) -> None:
+    cutoff = datetime.now().timestamp() - (prune_days * 86400)
+    for pattern in ("*.log*", "*.txt"):
+        for path in log_dir.glob(pattern):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except Exception:
+                continue

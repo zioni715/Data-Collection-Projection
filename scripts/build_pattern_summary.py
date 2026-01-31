@@ -76,6 +76,7 @@ def main() -> None:
     hourly_votes = defaultdict(Counter)
     hourly_minutes = defaultdict(Counter)
     app_totals = Counter()
+    focus_stats = []
     weekday_votes = defaultdict(lambda: defaultdict(Counter))
     weekday_minutes = defaultdict(lambda: defaultdict(Counter))
     include_apps = _parse_apps(args.include_apps)
@@ -109,6 +110,9 @@ def main() -> None:
             if include_apps and item.get("app") not in include_apps:
                 continue
             app_totals[item["app"]] += int(item.get("seconds", 0))
+        stats = summary.get("focus_block_stats") or {}
+        if stats.get("count"):
+            focus_stats.append(stats)
 
     patterns = []
     for hour_str in sorted(hourly_votes.keys()):
@@ -148,8 +152,11 @@ def main() -> None:
             )
 
     sequence_patterns = []
+    transition_patterns = []
     if args.config:
-        sequence_patterns = _build_sequences(args, include_apps, include_hours)
+        sequence_patterns, transition_patterns = _build_sequences(
+            args, include_apps, include_hours
+        )
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -157,6 +164,9 @@ def main() -> None:
         "patterns": patterns,
         "weekday_patterns": weekday_patterns,
         "sequence_patterns": sequence_patterns,
+        "transition_patterns": transition_patterns,
+        "time_bucket_patterns": _build_time_bucket_patterns(summaries),
+        "focus_block_stats": _aggregate_focus_stats(focus_stats),
         "top_apps": [
             {"app": app, "minutes": int(sec // 60), "seconds": int(sec)}
             for app, sec in app_totals.most_common(10)
@@ -210,7 +220,7 @@ def _build_sequences(
     args: argparse.Namespace,
     include_apps: set[str],
     include_hours: set[int],
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     config = load_config(args.config)
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, args.since_days))
 
@@ -223,7 +233,7 @@ def _build_sequences(
         except Exception:
             tzinfo = None
 
-    sequences = []
+    sequences: list[list[str]] = []
     current_day = None
     day_apps: list[str] = []
 
@@ -306,7 +316,73 @@ def _build_sequences(
                 "confidence": confidence,
             }
         )
+    transition_patterns = _build_transition_patterns(sequences, args.top_sequences)
+    return results, transition_patterns
+
+
+def _build_transition_patterns(
+    sequences: list[list[str]], top_k: int
+) -> list[dict]:
+    transitions = Counter()
+    for seq in sequences:
+        for i in range(len(seq) - 1):
+            left = seq[i]
+            right = seq[i + 1]
+            if not left or not right or left == right:
+                continue
+            transitions[(left, right)] += 1
+    results = []
+    for (left, right), count in transitions.most_common(top_k):
+        results.append({"from": left, "to": right, "support": int(count)})
     return results
+
+
+def _build_time_bucket_patterns(summaries: list[dict]) -> dict:
+    bucket_minutes = defaultdict(Counter)
+    bucket_days = defaultdict(Counter)
+    for summary in summaries:
+        buckets = summary.get("time_buckets") or {}
+        for bucket_name, items in buckets.items():
+            if not items:
+                continue
+            top_app = items[0].get("app")
+            if top_app:
+                bucket_days[bucket_name][top_app] += 1
+            for item in items:
+                app = item.get("app")
+                if not app:
+                    continue
+                seconds = int(item.get("seconds", 0))
+                bucket_minutes[bucket_name][app] += seconds
+
+    output = {}
+    for bucket_name, counts in bucket_days.items():
+        winner, days = counts.most_common(1)[0]
+        minutes = bucket_minutes[bucket_name][winner] // 60
+        output[bucket_name] = {
+            "app": winner,
+            "days": int(days),
+            "minutes": int(minutes),
+        }
+    return output
+
+
+def _aggregate_focus_stats(items: list[dict]) -> dict:
+    if not items:
+        return {"avg_sec": 0, "median_sec": 0, "p90_sec": 0}
+    avg_vals = [int(item.get("avg_sec", 0)) for item in items]
+    med_vals = [int(item.get("median_sec", 0)) for item in items]
+    p90_vals = [int(item.get("p90_sec", 0)) for item in items]
+    def _median(values: list[int]) -> int:
+        if not values:
+            return 0
+        values = sorted(values)
+        return values[len(values) // 2]
+    return {
+        "avg_sec": int(sum(avg_vals) / max(1, len(avg_vals))),
+        "median_sec": _median(med_vals),
+        "p90_sec": _median(p90_vals),
+    }
 
 
 def _parse_apps(value: str) -> set[str]:

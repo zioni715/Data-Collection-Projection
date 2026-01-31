@@ -94,10 +94,14 @@ def main() -> None:
 
     apps = Counter()
     hourly = defaultdict(Counter)
+    bucket_usage = defaultdict(Counter)
     key_events = Counter()
     idle_start = 0
     idle_end = 0
     focus_blocks = 0
+    focus_durations: list[int] = []
+    transitions = Counter()
+    last_app = None
 
     p0_set = {item.lower() for item in config.priority.p0_event_types}
     p1_set = {item.lower() for item in config.priority.p1_event_types}
@@ -133,6 +137,13 @@ def main() -> None:
             app_key = app or "UNKNOWN"
             apps[app_key] += duration
             hourly[hour][app_key] += duration
+            bucket = _bucket_for_hour(hour)
+            if bucket:
+                bucket_usage[bucket][app_key] += duration
+            focus_durations.append(duration)
+            if last_app and last_app != app_key:
+                transitions[(last_app, app_key)] += 1
+            last_app = app_key
 
     summary = {
         "date_local": target_date.isoformat(),
@@ -154,6 +165,13 @@ def main() -> None:
         ],
         "hourly_usage": {},
         "key_events": dict(key_events),
+        "focus_block_stats": _summarize_durations(focus_durations),
+        "app_switches": int(sum(transitions.values())),
+        "top_transitions": [
+            {"from": pair[0], "to": pair[1], "count": int(count)}
+            for pair, count in transitions.most_common(10)
+        ],
+        "time_buckets": {},
     }
 
     for hour in range(24):
@@ -161,6 +179,13 @@ def main() -> None:
             continue
         top = hourly[hour].most_common(args.top_hourly)
         summary["hourly_usage"][f"{hour:02d}"] = [
+            {"app": app, "minutes": int(sec // 60), "seconds": int(sec)}
+            for app, sec in top
+        ]
+
+    for bucket_name, counter in bucket_usage.items():
+        top = counter.most_common(args.top_hourly)
+        summary["time_buckets"][bucket_name] = [
             {"app": app, "minutes": int(sec // 60), "seconds": int(sec)}
             for app, sec in top
         ]
@@ -216,12 +241,6 @@ def main() -> None:
 
     conn.close()
 
-
-def _ensure_summary_tables(cur: sqlite3.Cursor) -> None:
-    migrations_path = Path(__file__).resolve().parents[1] / "migrations" / "007_summaries.sql"
-    if migrations_path.exists():
-        cur.executescript(migrations_path.read_text(encoding="utf-8"))
-
     if args.output:
         out_path = Path(args.output)
     else:
@@ -230,6 +249,41 @@ def _ensure_summary_tables(cur: sqlite3.Cursor) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"daily_summary_saved={out_path}")
+
+
+def _ensure_summary_tables(cur: sqlite3.Cursor) -> None:
+    migrations_path = Path(__file__).resolve().parents[1] / "migrations" / "007_summaries.sql"
+    if migrations_path.exists():
+        cur.executescript(migrations_path.read_text(encoding="utf-8"))
+
+
+def _bucket_for_hour(hour: int) -> str:
+    if 0 <= hour < 6:
+        return "night"
+    if 6 <= hour < 12:
+        return "morning"
+    if 12 <= hour < 18:
+        return "afternoon"
+    if 18 <= hour < 24:
+        return "evening"
+    return "unknown"
+
+
+def _summarize_durations(durations: list[int]) -> dict:
+    if not durations:
+        return {"count": 0, "avg_sec": 0, "median_sec": 0, "p90_sec": 0}
+    values = sorted(max(0, int(value)) for value in durations)
+    count = len(values)
+    avg_sec = int(sum(values) / count)
+    median_sec = values[count // 2]
+    p90_index = min(count - 1, int(count * 0.9))
+    p90_sec = values[p90_index]
+    return {
+        "count": count,
+        "avg_sec": avg_sec,
+        "median_sec": median_sec,
+        "p90_sec": p90_sec,
+    }
 
 
 if __name__ == "__main__":

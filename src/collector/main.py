@@ -189,6 +189,7 @@ def run() -> None:
         activity_detail_text_backup_count=config.logging.activity_detail_text_backup_count,
         timezone_name=config.logging.timezone,
         include_run_id=config.logging.include_run_id,
+        prune_days=config.logging.prune_days,
     )
 
     logger.info("starting collector")
@@ -363,6 +364,41 @@ def _run_post_collection(config) -> None:
 
     logger.info("post_collection starting")
     try:
+        if post.run_sessions:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "build_sessions.py"),
+                "--config",
+                str(config.config_path),
+                "--since-hours",
+                "24",
+                "--gap-minutes",
+                str(int(post.session_gap_minutes)),
+            ]
+            subprocess.run(cmd, check=False)
+        if post.run_routines:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "build_routines.py"),
+                "--config",
+                str(config.config_path),
+                "--days",
+                str(int(post.routine_days)),
+                "--min-support",
+                str(int(post.routine_min_support)),
+                "--n-min",
+                str(int(post.routine_n_min)),
+                "--n-max",
+                str(int(post.routine_n_max)),
+            ]
+            subprocess.run(cmd, check=False)
+        if post.run_handoff:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "build_handoff.py"),
+                "--keep-latest-pending",
+            ]
+            subprocess.run(cmd, check=False)
         if post.run_daily_summary:
             cmd = [
                 python_exe,
@@ -432,6 +468,18 @@ def _run_post_collection(config) -> None:
             ]
             if config.automation.dry_run:
                 cmd.append("--dry-run")
+            subprocess.run(cmd, check=False)
+        if post.run_pattern_report:
+            cmd = [
+                python_exe,
+                str(scripts_dir / "report_patterns.py"),
+                "--config",
+                str(config.config_path),
+                "--since-days",
+                "3",
+                "--output",
+                str(Path(output_dir) / "pattern_report.md"),
+            ]
             subprocess.run(cmd, check=False)
     except Exception:
         logger.exception("post_collection failed")

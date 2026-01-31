@@ -60,6 +60,22 @@ $env:PYTHONPATH = "src"
 python -m collector.main --config configs\config_run4.yaml
 ```
 
+Run a separate collection (run5 DB/logs):
+```powershell
+$env:PYTHONPATH = "src"
+python -m collector.main --config configs\config_run5.yaml
+```
+
+Run run5 with auto key load:
+```powershell
+scripts\run_run5.ps1
+```
+
+Check browser content capture quality (run5):
+```powershell
+python scripts\check_content_capture.py --db collector_run5.db --key-path secrets\\collector_key.txt --limit 200
+```
+
 Auto-start sensors (optional, via config):
 ```yaml
 sensors:
@@ -297,6 +313,27 @@ Main config: `configs\config.yaml`
 - logging: JSON log path, rotation, timezone
 - privacy.url_mode: `rules` (use rules file), `full` (keep full URL), `domain` (store domain only)
 - summary_db_path: optional separate SQLite file for summaries
+- post_collection: optional automatic jobs (sessions/routines/handoff/summaries/LLM)
+
+post_collection example:
+```yaml
+post_collection:
+  enabled: true
+  run_sessions: true
+  run_routines: true
+  run_handoff: true
+  run_daily_summary: true
+  run_pattern_summary: true
+  run_llm_input: true
+  run_pattern_report: true
+  output_dir: logs/run5
+  llm_max_bytes: 8000
+  session_gap_minutes: 15
+  routine_days: 7
+  routine_min_support: 2
+  routine_n_min: 2
+  routine_n_max: 3
+```
 
 ### Encryption (raw_json at rest)
 Set an encryption key and enable in config (recommended for detailed content capture):
@@ -335,8 +372,10 @@ C:\Data-Collection-Projection\
     config_run2.yaml           # separate DB/logs config for run2
     config_run3.yaml           # separate DB/logs config for run3
     config_run4.yaml           # separate DB/logs config for run4
+    config_run5.yaml           # separate DB/logs config for run5
     privacy_rules.yaml         # masking/hashing/allowlist/denylist rules
     privacy_rules_run3.yaml    # run3 privacy rules (full URL allowed)
+    privacy_rules_run5.yaml    # run5 privacy rules
   browser_extension\
     manifest.json              # Chrome/Whale extension manifest
     background.js              # sends tab URL/title to /events
@@ -381,6 +420,7 @@ C:\Data-Collection-Projection\
     uninstall_archive_monthly_task.ps1 # remove monthly task
     run_allowlist_recommendation.ps1 # run allowlist recommendation (PowerShell)
     run_core.ps1               # start collector with conda
+    run_run5.ps1               # start run5 with key auto-load
     install_service.ps1        # Task Scheduler installer
     uninstall_service.ps1      # Task Scheduler remover
   src\

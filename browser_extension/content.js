@@ -60,9 +60,13 @@ function extractHeadings() {
 function extractContentSummary() {
   const selection = normalizeText(window.getSelection?.().toString() || "");
   const headings = extractHeadings();
+  const title = normalizeText(document.title || "");
   const bodyText = normalizeText(document.body?.innerText || "");
 
   const parts = [];
+  if (title) {
+    parts.push(title);
+  }
   if (headings.length) {
     parts.push(headings.join(" | "));
   }
